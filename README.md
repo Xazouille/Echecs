@@ -1,0 +1,53 @@
+# Coup par Coup
+
+Analyse tes parties Chess.com avec Stockfish 17.1. Chaque coup est expliqué en français : ce qu'il fait, pourquoi il perd, quelle tactique a été manquée et si elle était à la portée du joueur.
+
+## Utiliser le site en ligne
+
+**https://TON-PSEUDO-GITHUB.github.io/coup-par-coup/** (lien à mettre à jour après la publication)
+
+Entre ton pseudo Chess.com, choisis une partie, puis clique sur « Analyser ». L'analyse tourne dans ton navigateur : rien n'est envoyé ailleurs qu'à l'API publique de Chess.com pour récupérer tes parties.
+
+## Ce que fait l'analyse
+
+- **Classement des coups**, comme sur Chess.com : brillant, très bon coup, meilleur coup, excellent, bon, théorique, imprécision, erreur, occasion manquée, gaffe.
+- **Seuils selon le niveau** : la perte tolérée change selon le niveau du joueur. Il est détecté depuis l'Elo de la partie, ou tu peux le choisir.
+- **Explications détaillées** pour chaque coup : menaces créées, fourchettes, clouages, enfilades, attaques à la découverte, pièces laissées en prise, sacrifices.
+- **Tactiques manquées**, avec la suite gagnante et une difficulté estimée en Elo, comparée au niveau du joueur.
+- **Options du moteur** : les 3 meilleurs coups, chacun avec son idée en une phrase.
+- **Bilan** : précision, performance estimée, précision par phase, moments clés et conseils pour progresser.
+- **Exploration** : clique sur une pièce pour tester ton propre coup. Il est analysé et expliqué comme les coups de la partie.
+
+Les coups décisifs sont revérifiés plus profondément à la fin de l'analyse.
+
+## Lancer le site sur son ordinateur (sans internet pour le site lui-même)
+
+### Windows
+1. Si tu as téléchargé un `.zip`, fais d'abord un clic droit dessus → « Extraire tout… ».
+2. Double-clique sur `Lancer.bat`. Si Windows demande confirmation, réponds Oui (ou « Informations complémentaires » → « Exécuter quand même »).
+3. Le navigateur s'ouvre sur http://localhost:8765. Laisse la fenêtre noire ouverte pendant que tu utilises le site.
+
+### Mac
+1. Si tu as téléchargé un `.zip`, double-clique dessus pour l'extraire.
+2. Ouvre l'app **Terminal**, tape `sh ` (avec un espace), glisse le fichier `Lancer-Mac.command` dans la fenêtre, puis appuie sur Entrée.
+3. Le navigateur s'ouvre sur http://localhost:8765. Laisse le Terminal ouvert pendant que tu utilises le site.
+
+Aucune installation n'est nécessaire : le serveur local est un script PowerShell sur Windows et un script Perl sur Mac, tous deux fournis avec le système. Une connexion internet reste nécessaire pour récupérer les parties sur Chess.com.
+
+## Structure
+
+- `docs/` : le site (c'est ce dossier que GitHub Pages publie)
+  - `js/explain.js` : reconnaissance des motifs tactiques
+  - `js/analysis.js` : classement des coups, précision, bilan
+  - `js/commentary.js` : rédaction des commentaires
+  - `vendor/` : Stockfish 17.1, chess.js, pièces « cburnett »
+- `server.ps1` / `Lancer.bat` : serveur local Windows
+- `serveur-mac.pl` / `Lancer-Mac.command` : serveur local Mac
+- `NOTES-DEV.md` : notes de développement détaillées
+
+## Crédits et licences
+
+- [Stockfish](https://stockfishchess.org) 17.1, version WebAssembly [stockfish.js](https://github.com/nmrugg/stockfish.js) : GPLv3 (texte complet dans `docs/vendor/stockfish/Copying.txt`)
+- [chess.js](https://github.com/jhlywa/chess.js) 1.4.0 : licence BSD-2-Clause
+- Pièces « cburnett » de Colin M.L. Burnett, via [chessground](https://github.com/lichess-org/chessground) : GPLv2+
+- Données des parties : [API publique de Chess.com](https://www.chess.com/news/view/published-data-api)
