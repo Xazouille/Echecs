@@ -117,22 +117,97 @@ function terminalEval(fen) {
 }
 
 const cache = new Map();
-const fenKey = (fen) => fen.split(' ').slice(0, 4).join(' ');
+const fenKey = (fen, multipv = 3) => `${fen.split(' ').slice(0, 4).join(' ')}|${multipv}`;
 
-export function cachedEval(fen, depth = 0) {
+export function cachedEval(fen, depth = 0, multipv = 3) {
   const t = terminalEval(fen);
   if (t) return t;
-  const hit = cache.get(fenKey(fen));
+  const hit = cache.get(fenKey(fen, multipv));
   return hit && hit.depth >= depth ? hit : null;
 }
 
-export async function evaluate(engine, fen, { depth, priority = false, tag = '', lane }) {
-  const hit = cachedEval(fen, depth);
+// Mémoire permanente des évaluations (IndexedDB, dans le navigateur). Une position déjà analysée,
+// dans cette partie (réouverture) ou dans une autre (ouvertures répétées : environ 10 % des
+// positions sur les parties de Xazouille), n'est pas recalculée. La clé contient le moteur, pour ne
+// pas mélanger le moteur complet et la version lite. Sans IndexedDB (navigation privée…), on s'en
+// passe. Au-delà de DB_MAX positions, les plus anciennes sont oubliées.
+const DB_MAX = 60000;
+let dbPromise = null;
+let dbWrites = 0;
+
+function openDb() {
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve) => {
+      try {
+        const req = indexedDB.open('coup-par-coup', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('evals').createIndex('t', 't');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  return dbPromise;
+}
+
+async function dbGet(key) {
+  const db = await openDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const req = db.transaction('evals').objectStore('evals').get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function dbPut(key, value) {
+  const db = await openDb();
+  if (!db) return;
+  try {
+    db.transaction('evals', 'readwrite').objectStore('evals').put({ ...value, t: Date.now() }, key);
+    if (++dbWrites % 500 === 0) dbPrune(db);
+  } catch {
+    // Quota dépassé ou base indisponible : l'analyse continue sans mémoriser.
+  }
+}
+
+function dbPrune(db) {
+  const store = db.transaction('evals', 'readwrite').objectStore('evals');
+  const count = store.count();
+  count.onsuccess = () => {
+    let extra = count.result - DB_MAX;
+    if (extra <= 0) return;
+    store.index('t').openCursor().onsuccess = (e) => {
+      const cur = e.target.result;
+      if (!cur || extra-- <= 0) return;
+      cur.delete();
+      cur.continue();
+    };
+  };
+}
+
+export async function evaluate(engine, fen, { depth, priority = false, tag = '', lane, multipv = 3 }) {
+  const hit = cachedEval(fen, depth, multipv);
   if (hit) return hit;
-  const res = await engine.analyze(fen, { depth, multipv: 3, priority, tag, lane });
+  const key = fenKey(fen, multipv);
+  const dbKey = engine.key ? `${engine.key}|${key}` : null;
+  const stored = dbKey ? await dbGet(dbKey) : null;
+  if (stored && stored.depth >= depth) {
+    const out = { fen, lines: stored.lines, depth: stored.depth };
+    cache.set(key, out);
+    return out;
+  }
+  const res = await engine.analyze(fen, { depth, multipv, priority, tag, lane });
   if (!res) return null;
   const out = { fen, lines: res.lines, depth: res.depth };
-  cache.set(fenKey(fen), out);
+  cache.set(key, out);
+  if (dbKey && res.lines.length) dbPut(dbKey, { lines: res.lines, depth: res.depth });
   return out;
 }
 

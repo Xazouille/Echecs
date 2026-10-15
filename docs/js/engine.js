@@ -75,6 +75,8 @@ export class Engine {
       this.threads = threads;
       this.file = file;
       this.name = name;
+      // Identifie le moteur dans la mémoire des évaluations (complet ou lite).
+      this.key = file.split('/').pop().replace(/\.js$/, '');
       this.worker.onerror = (ev) => fail(ev.message || 'Le moteur n’a pas pu démarrer.');
       this.worker.onmessage = (ev) => this.onLine(String(ev.data));
       this.expect('uciok')
@@ -195,6 +197,7 @@ export class EnginePool {
     if (this.ready) return this.ready;
     const first = new Engine();
     this.ready = first.init().then(() => {
+      this.key = first.key;
       this.add(first);
       this.label = this.size > 1 ? `${first.name} · ${this.size} moteurs en parallèle` : first.label;
       // Les autres moteurs démarrent ensuite, le fichier étant déjà en cache. Un échec n'empêche

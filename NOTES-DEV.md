@@ -435,6 +435,24 @@ Elle compare la position avant et après le coup, avec le mini-modèle de `posit
      - profondeur 12 : 8, 33 et 66 s ;
      - profondeur 16 (vérification à 20) : 72, 128 et 303 s.
    - Test de précision en profondeur 16 sur ces 3 parties : écart moyen avec Chess.com de **0,8 point** par joueur, contre 1,7 en profondeur 12. Mais 15 à 25 % des coups changent de classement, et l'échantillon est trop petit pour conclure. La formule de précision a été calée en profondeur 12.
+   - **Mémoire permanente des évaluations** (IndexedDB, `evaluate` dans analysis.js). Clé : moteur, position (FEN sans les compteurs), nombre de variantes. Une position déjà analysée à une profondeur suffisante n'est pas recalculée : rouvrir une partie prend 0 s au lieu de 5 s, et environ 10 % des positions reviennent d'une partie à l'autre (ouvertures). Au plus 60 000 positions sont gardées ; les plus anciennes sont oubliées.
+   - **Où va le temps** (Xazouille – Proko91, 53 demi-coups, en millions de nœuds, ce qui ne dépend pas de la chauffe du processeur) :
+
+     | Réglage | 1er passage | Vérification | Coups reclassés |
+     |---|---|---|---|
+     | 12, vérification à 16 (actuel) | 2,6 | 6,2 | – (bruit : 4) |
+     | 12, vérification à 14 | 2,6 | 2,2 | 5 |
+     | 12, sans vérification | 2,5 | 0 | 7 |
+     | 16, vérification à 20 | 22 | 51 | – (bruit : 1) |
+     | 16, vérification à 18 | 22 | 20 | 4 |
+     | 16, sans vérification | 22 | 0 | 2 |
+     | 16, 2 variantes au lieu de 3 | 14 | 41 | 15 |
+     | 16, ordre inverse | 21 | 41 | 13 |
+     | 16, mémoire du moteur vidée à chaque position | 22 | 41 | 9 |
+
+     - La vérification des moments clés en +4 coûte environ 70 % du travail. En profondeur 16, elle ne change presque rien. En profondeur 12, la supprimer dégrade un peu le résultat (précision −1,3 point).
+     - Passer à 2 variantes réduit le travail, mais change les évaluations (et donc le calage).
+     - L'ordre inverse et une mémoire de 256 Mo par moteur n'apportent rien.
 2. **Taille** : le moteur complet pèse 99 Mo, d'où un dossier du site d'environ 97 Mo. Le mode de secours (lite) est moins précis et n'a pas été calé.
 3. **Détection heuristique** :
    - la SEE tient compte des clouages et des échecs (voir « Détection des motifs »), mais ne compte pas la valeur d'une promotion dans un échange ;
