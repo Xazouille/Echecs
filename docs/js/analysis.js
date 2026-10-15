@@ -208,9 +208,9 @@ const PV_KEEP = 12;
 const trimLines = (lines) => lines.map((l) => ({ score: l.score, pv: l.pv.slice(0, PV_KEEP), depth: l.depth }));
 
 // Évaluations précalculées des ouvertures les plus jouées (data/ouvertures.json, Stockfish 19 complet,
-// profondeur 18) : le livre d'ouvertures du site et les positions qui reviennent dans les parties de
-// Xazouille. Chargées une fois, elles évitent de recalculer les premiers coups de la plupart des
-// parties, même à la toute première analyse.
+// profondeur 20, donc valables pour les trois niveaux) : le livre d'ouvertures du site et les
+// positions qui reviennent dans les parties de Xazouille. Chargées une fois, elles évitent de
+// recalculer les premiers coups de la plupart des parties, même à la toute première analyse.
 let openingsPromise = null;
 function loadOpenings() {
   if (!openingsPromise) {

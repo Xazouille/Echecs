@@ -491,12 +491,13 @@ Elle compare la position avant et après le coup, avec le mini-modèle de `posit
    - **Mémoire permanente des évaluations** (IndexedDB, `evaluate` dans analysis.js). Clé : moteur, position (FEN sans les compteurs), nombre de variantes. Une position déjà analysée à une profondeur suffisante n'est pas recalculée : rouvrir une partie prend 0 s au lieu de 5 s, et environ 10 % des positions reviennent d'une partie à l'autre (ouvertures).
      - Poids : environ 400 octets par position, les variantes étant coupées à 12 coups. Cela fait 25 Ko par partie et 24 Mo au plus pour 60 000 positions (environ 1 000 parties).
      - Au-delà, les positions les plus anciennes sont oubliées. Le quota du navigateur est de plusieurs Go.
-   - **Ouvertures précalculées** (`data/ouvertures.json`) : environ 1 000 positions analysées en profondeur 18 avec Stockfish 19 complet, MultiPV 3, variantes coupées à 12 coups.
+   - **Ouvertures précalculées** (`data/ouvertures.json`) : 1 004 positions analysées en **profondeur 20** avec Stockfish 19 complet, MultiPV 3, variantes coupées à 12 coups (422 Ko, environ 100 Ko compressé).
      - Le livre du site fournit 596 positions (172 lignes).
      - S'y ajoutent les positions jouées au moins deux fois dans les 16 premiers demi-coups des 484 dernières parties de Xazouille.
      - Le fichier est chargé une fois, puis mis en cache par le navigateur. Dès la toute première analyse, ces positions ne sont pas recalculées.
-     - Il sert aux niveaux Rapide (16) et Standard (18), et au premier rendu à 14. Il ne sert pas au niveau Approfondie (20), plus profond que lui : pour cela, il faudrait le recalculer à 20 (environ 25 à 30 min de calcul).
-     - Ces évaluations sont plus profondes que celles des niveaux : le premier coup hors de ces positions compare une évaluation à 18 et une autre à la profondeur du niveau. L'effet est faible, ces positions étant équilibrées.
+     - En profondeur 20, il sert aux trois niveaux et au premier rendu à 14.
+     - Historique : une première version en profondeur 18 ne servait pas au niveau Approfondie. Recalcul en 20 le 15 octobre 2026 : environ 3,5 s par position avec 4 moteurs sur secteur, et 3 à 4 fois plus sur batterie, Windows bridant alors le processeur. Le calcul était reprenable : résultats gardés au fur et à mesure dans le navigateur, pause automatique sur batterie sous 50 %.
+     - Ces évaluations sont plus profondes que celles des niveaux Rapide et Standard : le premier coup hors de ces positions compare une évaluation à 20 et une autre à la profondeur du niveau. L'effet est faible, ces positions étant équilibrées.
    - **Nouveaux niveaux**, sur une partie de 27 demi-coups, avec 4 moteurs et la mémoire vide :
      - Rapide (12, moments clés à 16) : 7,4 s ;
      - Standard (15) : 5,7 s ;
