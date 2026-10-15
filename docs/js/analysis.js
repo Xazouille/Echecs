@@ -311,7 +311,10 @@ export function parseGame(pgn, meta = {}) {
 // Précision d'un coup : même forme que Lichess, mais bien plus sévère (ACC_B au lieu de 0,0435),
 // sur la courbe de chances de gain plus plate `accWinPct`. Les pertes de moins de ACC_TOL points
 // sont ignorées : ce sont surtout des écarts de calcul entre notre moteur et celui de Chess.com.
-const ACC_B = 0.15;
+// ACC_B est passé de 0,15 (calé en profondeur 12) à 0,16 pour les niveaux profonds : sur 24 parties
+// analysées en profondeur 18, la précision sortait 0,9 point trop haute ; avec 0,16, l'écart moyen
+// avec Chess.com est de 2,20 points en validation croisée, contre 2,27 (voir NOTES-DEV.md).
+const ACC_B = 0.16;
 const ACC_TOL = 0.5;
 
 function moveAccuracy(before, after) {
@@ -541,7 +544,9 @@ export class GameAnalysis {
 // Précision de partie : moyenne de puissance ACC_POWER des précisions des coups, (Σ a^p / n)^(1/p).
 // Une grosse faute y pèse plus que dans une moyenne simple, mais bien moins que dans la moyenne
 // harmonique de Lichess. Calée sur 155 parties Chess.com (14 octobre 2026) ; sur 92 parties de
-// validation, 3,2 points d'écart moyen avec Chess.com (voir NOTES-DEV.md, « Précision »).
+// validation, 3,2 points d'écart moyen avec Chess.com en profondeur 12. Recalée le 15 octobre 2026
+// pour les niveaux profonds (ACC_B) : 2,2 points sur 24 de ces parties en profondeur 18 (voir
+// NOTES-DEV.md, « Précision »).
 const ACC_POWER = 0.4;
 
 function gameAccuracy(an, color) {

@@ -163,7 +163,7 @@ Le niveau est automatique (Elo de chaque joueur pour ses propres coups) ou forc�
 ### Précision et performance (calées sur Chess.com le 14 octobre 2026, avec Stockfish 19 complet)
 La précision n'utilise **pas** la même courbe de chances de gain que le classement des coups. Les constantes `ACC_*` dépendent du moteur et de la profondeur : il faut les recaler à chaque changement de Stockfish.
 - Chances de gain pour la précision (`accWinPct`) : même formule, mais avec une pente `ACC_K = 0,00175` au lieu de 0,00368, et **sans plafond** des évaluations (le classement des coups garde le plafond à ±1000 centipions). La courbe est plus plate.
-- Précision d'un coup : `perte' = perte − ACC_TOL`, avec `ACC_TOL = 0,5` point. Les micro-pertes sont ignorées. Si `perte' ≤ 0` : 100. Sinon : `103,17 × e^(−ACC_B × perte') − 3,17 + 1`, avec `ACC_B = 0,15`, borné entre 0 et 100.
+- Précision d'un coup : `perte' = perte − ACC_TOL`, avec `ACC_TOL = 0,5` point. Les micro-pertes sont ignorées. Si `perte' ≤ 0` : 100. Sinon : `103,17 × e^(−ACC_B × perte') − 3,17 + 1`, avec `ACC_B = 0,16` (0,15 jusqu'au 15 octobre 2026, voir « Recalage pour les niveaux profonds »), borné entre 0 et 100.
 - Précision de partie : **moyenne de puissance** `ACC_POWER = 0,4` des précisions des coups, `(Σ a^0,4 / n)^(1/0,4)`. Une grosse faute y pèse plus que dans une moyenne simple, mais bien moins que dans la moyenne harmonique de Lichess.
 
 **Deuxième amélioration : sans plafond (14 octobre 2026).**
@@ -214,7 +214,28 @@ Pour γ = 0,9, sur les 92 parties, la différence est de −0,05, intervalle à 
 
 Plus de réglages ne captent pas d'information nouvelle : ils collent au bruit des parties de réglage et font moins bien sur les nouvelles parties.
 
-**Conclusion** : la forme de la formule est à son optimum avec ces données. L'écart restant (environ 3,2 points) vient surtout des différences d'évaluation entre notre analyse (Stockfish 19, profondeur 12) et celle de Chess.com, et des parties secrètes de leur méthode. Seule piste restante, non testée car coûteuse : analyser plus profondément, puis recaler (plusieurs heures de calcul, et un site plus lent).
+**Conclusion** : la forme de la formule est à son optimum avec ces données. L'écart restant (environ 3,2 points) vient surtout des différences d'évaluation entre notre analyse (Stockfish 19, profondeur 12) et celle de Chess.com, et des parties secrètes de leur méthode. Seule piste restante, non testée car coûteuse : analyser plus profondément, puis recaler (plusieurs heures de calcul, et un site plus lent). Cette piste a été suivie le 15 octobre 2026 : voir ci-dessous.
+
+**Recalage pour les niveaux profonds (15 octobre 2026).**
+- **Contexte** : les niveaux sont passés à 16, 18 et 20, sans vérification des moments clés, alors que la formule avait été calée en profondeur 12.
+- **Données** (`calage/precision-chesscom-profondeur18.json`) : 24 des 92 parties de validation, réanalysées en profondeur 18 (le niveau Standard), avec les ouvertures précalculées comme sur le site.
+  - 12 de xazouille (une sur cinq), 8 entre 1 000 et 1 800 Elo (une sur deux), 4 à 2 000+ (une sur trois).
+  - Les évaluations en profondeur 12 de la validation servent de référence, pour les mêmes parties.
+- **Résultats** (écart moyen par joueur avec Chess.com, 48 précisions) :
+
+  | Analyse | Écart moyen | Biais |
+  |---|---|---|
+  | Profondeur 12 (ancien Standard) | 2,67 | +0,2 |
+  | Profondeur 18, `ACC_B = 0,15` | 2,27 | +0,9 |
+  | Profondeur 18, `ACC_B = 0,16` (retenu) | 2,20 en validation croisée | −0,2 |
+
+  - Différence profondeur 18 − profondeur 12 : −0,40 point, intervalle à 95 % (bootstrap par partie) de −0,82 à +0,03. L'analyse profonde se rapproche très probablement de Chess.com.
+  - Par groupe, en profondeur 12 puis 18 : xazouille 2,53 → 2,21 ; 1 000 à 1 800 Elo 3,76 → 2,95 ; 2 000+ (4 parties seulement) 0,89 → 1,11.
+- **Réajustement** : un seul réglage, choisi en laissant de côté une partie à la fois (validation croisée à 24 plis).
+  - `ACC_B` : 0,16 est choisi dans chacun des 24 plis ; écart 2,20 en validation croisée, biais −0,2. **Retenu.**
+  - `ACC_TOL` : 0,3 (0,2 dans certains plis) ; écart 2,19 en validation croisée. Gain équivalent mais moins stable, non retenu.
+  - `ACC_K` : aucun gain.
+- **À savoir** : une seule formule sert aux trois niveaux. Elle est calée sur Standard (18). Entre les profondeurs 12 et 18, la précision est montée d'environ 0,7 point. Rapide (16) devrait donc être très légèrement plus sévère que Standard, et Approfondie (20) très légèrement plus clément ; non mesuré.
 
 **Évolution de la formule de partie (14 octobre 2026).**
 - **Avant** : 0,25 de moyenne pondérée par la volatilité et 0,75 de moyenne simple, avec `ACC_K = 0,0015`, `ACC_B = 0,25`, `ACC_TOL = 0,5`.
