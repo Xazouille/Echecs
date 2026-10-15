@@ -51,9 +51,9 @@
         <label class="field">
           <span>Profondeur d’analyse</span>
           <select id="depthSel">
-            <option value="rapide">Rapide · profondeur 12, moments clés à 16</option>
-            <option value="standard">Standard · profondeur 15</option>
-            <option value="approfondie">Approfondie · profondeur 17, aperçu à 14</option>
+            <option value="rapide">Rapide · profondeur 16</option>
+            <option value="standard">Standard · profondeur 18</option>
+            <option value="approfondie">Approfondie · profondeur 20</option>
           </select>
         </label>
         <label class="field">
@@ -160,6 +160,8 @@
   <footer class="footer">
     <p>Analyse locale avec Stockfish 19 (WebAssembly, GPLv3) · Pièces « cburnett » · Données publiques de Chess.com. Les explications sont générées automatiquement à partir des variantes du moteur.</p>
   </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="js/app.js"></script>
 </body>

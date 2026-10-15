@@ -396,7 +396,8 @@ function startReview(game) {
   const an = new GameAnalysis(game, state.engine, { ...state.settings });
   state.analysis = an;
   renderAll();
-  setProgress(0, game.fens.length);
+  setProgress(0, game.fens.length, an.mode.preview ? 'preview' : 'scan');
+  const started = performance.now();
   state.engine.init()
     .then(() => an.run((done, total, phase) => {
       if (state.analysis !== an) return;
@@ -405,6 +406,8 @@ function startReview(game) {
       if (an.done) {
         renderSummary();
         if (!state.navigated) setTab('bilan');
+        // Pas de notification pour une partie déjà analysée, rouverte instantanément.
+        if (performance.now() - started > 4000) notify('Analyse complète terminée');
       }
     }))
     .catch((err) => {
@@ -412,19 +415,47 @@ function startReview(game) {
     });
 }
 
+// Une seule barre pour toute l'analyse. Le premier rendu rapide (`mode.preview`) n'est pas annoncé :
+// il occupe le début de la barre, en proportion de son coût (chaque profondeur de plus coûte
+// environ 1,5 fois plus).
 function setProgress(done, total, phase = 'scan') {
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  $('progressFill').style.width = `${pct}%`;
   const an = state.analysis;
-  $('progress').classList.toggle('is-done', !!(an && an.done));
-  $('progress').classList.toggle('is-check', phase === 'check');
   const mode = an ? an.mode : null;
-  let text = `Analyse ${done} / ${total} positions · profondeur ${an ? an.depth : ''}`;
-  if (phase === 'preview') text = `Premier aperçu ${done} / ${total} · profondeur ${mode.preview}`;
-  else if (phase === 'scan' && mode && mode.preview) text = `Aperçu affiché · approfondissement ${done} / ${total} · profondeur ${an.depth}`;
-  else if (phase === 'check') text = `Vérification des moments clés ${done} / ${total} · profondeur ${an.depth + mode.check}`;
-  if (an && an.done) text = `Analyse terminée · profondeur ${an.depth}${mode.check ? `, moments clés à ${an.depth + mode.check}` : ''}`;
-  $('progressText').textContent = text;
+  let frac = total ? done / total : 0;
+  if (mode && mode.preview) {
+    const share = 1 / (1 + 1.5 ** (mode.depth - mode.preview));
+    frac = phase === 'preview' ? frac * share : share + frac * (1 - share);
+  }
+  if (an && an.done) frac = 1;
+  const pct = Math.round(frac * 100);
+  $('progressFill').style.width = `${pct}%`;
+  $('progress').classList.toggle('is-done', !!(an && an.done));
+  $('progressText').textContent = an && an.done
+    ? `Analyse terminée · profondeur ${an.depth}`
+    : `Analyse ${pct} % · profondeur ${an ? an.depth : ''}`;
+}
+
+// Petite notification en bas de l'écran. Si l'onglet est en arrière-plan, une coche s'ajoute aussi
+// au titre de l'onglet, jusqu'au retour sur la page.
+function notify(text) {
+  const el = $('toast');
+  el.textContent = text;
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add('is-on'));
+  clearTimeout(notify.timer);
+  notify.timer = setTimeout(() => {
+    el.classList.remove('is-on');
+    setTimeout(() => { el.hidden = true; }, 300);
+  }, 5000);
+  if (document.hidden && !document.title.startsWith('✓ ')) {
+    document.title = `✓ ${document.title}`;
+    const back = () => {
+      if (document.hidden) return;
+      document.title = document.title.replace(/^✓ /, '');
+      document.removeEventListener('visibilitychange', back);
+    };
+    document.addEventListener('visibilitychange', back);
+  }
 }
 
 function setTab(tab) {
@@ -614,7 +645,8 @@ async function requestVarReport(m) {
   if (state.pending.has(key) || state.varReports.has(key)) return;
   state.pending.add(key);
   const an = state.analysis;
-  const depth = DEPTHS[state.settings.depth] || 15;
+  // Un coup testé doit répondre vite : on plafonne à 18 (quelques secondes), même en Approfondie.
+  const depth = Math.min(DEPTHS[state.settings.depth] || 18, 18);
   const [before, after] = await Promise.all([
     evaluate(state.engine, m.before, { depth, priority: true }),
     evaluate(state.engine, m.after, { depth, priority: true }),

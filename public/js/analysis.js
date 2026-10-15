@@ -9,16 +9,17 @@ import * as fr from './fr.js';
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 // Réglages d'analyse (15 octobre 2026). `depth` : profondeur du passage sur toutes les positions.
-// `check` : profondeur ajoutée pour revérifier les moments clés (0 = pas de vérification).
-// `preview` : premier rendu rapide à cette profondeur, affiché pendant l'approfondissement.
-// Mesures (Xazouille – Proko91, 53 demi-coups, 4 moteurs) : la vérification à +4 représente
-// environ 70 % du travail. Elle est utile à profondeur 12 (sans elle, 7 coups reclassés et
-// −1,3 point de précision), mais ne change presque plus rien à partir de 16 (2 coups sur 53).
-// « Rapide » reprend l'ancien « Standard », sur lequel la précision a été calée.
+// `preview` : premier rendu rapide à cette profondeur, affiché pendant l'approfondissement, puis
+// remplacé (évaluations et classements) par le résultat final.
+// Mesures (Xazouille – Proko91, 53 demi-coups, 4 moteurs, PC libre, environ 1,2 million de nœuds
+// par seconde) : travail 15 M de nœuds à 15, 31 M à 17, 49 M à 18, 77 M à 19, 110 M à 20 ;
+// chaque profondeur de plus coûte environ 1,5 fois plus. L'ancienne vérification des moments
+// clés à +4 représentait environ 70 % du travail et ne change presque plus rien à partir de 16
+// (2 coups sur 53) : elle a été retirée.
 export const MODES = {
-  rapide: { depth: 12, check: 4 },
-  standard: { depth: 15, check: 0 },
-  approfondie: { depth: 17, check: 0, preview: 14 },
+  rapide: { depth: 16, preview: 14 },
+  standard: { depth: 18, preview: 14 },
+  approfondie: { depth: 20, preview: 14 },
 };
 export const DEPTHS = Object.fromEntries(Object.entries(MODES).map(([k, m]) => [k, m.depth]));
 
@@ -466,13 +467,14 @@ export class GameAnalysis {
   }
 
   // onUpdate(fait, total, phase) — phase : 'preview' (premier rendu rapide), 'scan' (passage
-  // principal), 'check' (vérification des moments clés) ou 'done'.
+  // principal) ou 'done'.
   async run(onUpdate) {
     const mode = this.mode;
     const n = this.game.fens.length;
     if (mode.preview) {
       // Premier rendu rapide, affiché pendant l'approfondissement. Les résultats profonds sont gardés
-      // à part et remplacent l'aperçu d'un coup, à la fin : pas de mélange de profondeurs à l'écran.
+      // à part et remplacent l'aperçu d'un coup, à la fin : évaluations et classements (une
+      // « gaffe » de l'aperçu qui n'en est pas une est corrigée), sans mélange de profondeurs.
       if (!await this.scan(mode.preview, this.positions, true, onUpdate, 'preview')) return;
       this.refine();
       this.rebuild();
@@ -484,29 +486,6 @@ export class GameAnalysis {
       return;
     }
     this.refine();
-    this.rebuild();
-
-    if (mode.check) {
-      // Les coups qui changent le cours de la partie sont revérifiés plus profondément.
-      const lanes = this.engine.size || 1;
-      const critical = new Set();
-      this.reports.forEach((r, i) => {
-        if (['mistake', 'blunder', 'miss', 'brilliant', 'great'].includes(r.cls)) { critical.add(i); critical.add(i + 1); }
-      });
-      const todo = [...critical].filter((i) => !this.positions[i].terminal).slice(0, 24);
-      let checked = 0;
-      let stop = false;
-      onUpdate(0, todo.length, 'check');
-      await Promise.all(todo.map((i, k) => evaluate(this.engine, this.game.fens[i], {
-        depth: mode.depth + mode.check, tag: this.tag, lane: Math.floor((k * lanes) / todo.length),
-      }).then((res) => {
-        if (this.cancelled || !res) { stop = true; return; }
-        this.positions[i] = res;
-        onUpdate(++checked, todo.length, 'check');
-      })));
-      if (stop || this.cancelled) return;
-      this.refine();
-    }
     this.done = true;
     this.rebuild();
     onUpdate(n, n, 'done');

@@ -20,10 +20,12 @@ Entre ton pseudo Chess.com, choisis une partie, puis clique sur « Analyser ». 
 - **Bilan** : précision, performance estimée, précision par phase, moments clés et conseils pour progresser.
 - **Exploration** : clique sur une pièce pour tester ton propre coup. Il est analysé et expliqué comme les coups de la partie.
 
-Trois niveaux d'analyse :
-- **Rapide** : profondeur 12, les moments clés étant revérifiés à 16 ;
-- **Standard** : profondeur 15 ;
-- **Approfondie** : profondeur 17, avec un premier aperçu à 14 affiché en attendant.
+Trois niveaux d'analyse, pour une partie de 40 coups sur un PC récent :
+- **Rapide** : profondeur 16, environ 35 s ;
+- **Standard** : profondeur 18, environ 1 min ;
+- **Approfondie** : profondeur 20, environ 2 min 30.
+
+Une petite notification signale la fin de l'analyse complète.
 
 L'analyse utilise jusqu'à 4 cœurs du processeur. Les positions déjà analysées sont gardées dans le navigateur, et les ouvertures les plus jouées sont fournies déjà calculées (`data/ouvertures.json`) : elles ne sont jamais recalculées.
 

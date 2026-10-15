@@ -72,25 +72,42 @@ Chaque `.js` cherche le `.wasm` du même nom : ne renommer l'un qu'avec l'autre.
 
 ### Pipeline (`GameAnalysis.run`, analysis.js)
 1. `parseGame(pgn)` : coups (verbose chess.js avec `before`/`after`), FEN de chaque position, pendules `%clk`, cadence, profondeur de « livre ».
-2. **Passe 1** : chaque position est analysée à la profondeur du niveau choisi, MultiPV 3, par 4 moteurs en parallèle (`EnginePool`). Le rapport du coup *i* est construit dès que les positions *i* et *i+1* sont connues, d'où l'affichage progressif.
-   - **Niveaux** (`MODES`, analysis.js, 15 octobre 2026) :
+2. **Analyse** : chaque position est analysée à la profondeur du niveau choisi, MultiPV 3, par 4 moteurs en parallèle (`EnginePool`).
+   - **Niveaux** (`MODES`, analysis.js, choisis par l'utilisateur le 15 octobre 2026) :
 
-     | Niveau | Profondeur | Moments clés | Premier aperçu |
-     |---|---|---|---|
-     | Rapide | 12 | revérifiés à 16 | – |
-     | Standard | 15 | – | – |
-     | Approfondie | 17 | – | à 14 |
+     | Niveau | Profondeur | Temps estimé, partie de 40 coups, PC libre |
+     |---|---|---|
+     | Rapide | 16 | environ 35 s (premier rendu vers 8 s) |
+     | Standard | 18 | environ 1 min |
+     | Approfondie | 20 | environ 2 min 30 |
 
-   - « Rapide » est l'ancien « Standard », sur lequel la précision a été calée (anciens niveaux : 10, 12 et 15, avec vérification à +4).
-   - **Aperçu** (Approfondie) : toute la partie est d'abord analysée à 14 et affichée. Les résultats à 17 sont gardés à part et remplacent l'aperçu d'un coup, à la fin : on ne mélange jamais deux profondeurs à l'écran.
+     Historique des niveaux : 10, 12 et 15 avec vérification à +4 (jusqu'au 15 octobre) ; puis 12 avec vérification à 16, 15 et 17 ; enfin 16, 18 et 20.
+   - **Premier rendu à 14**, pour tous les niveaux et volontairement **non annoncé** dans l'interface. Toute la partie est d'abord analysée à 14 et affichée, avec ses classements, son graphique et ses commentaires. Les résultats profonds sont gardés à part, puis remplacent ce rendu d'un coup, à la fin : évaluations, classements (une « gaffe » qui n'en est pas une est corrigée), commentaires et bilan. On ne mélange jamais deux profondeurs à l'écran.
+     - Test dans l'interface (Xazouille – CMD2700, 77 coups, Rapide) : tous les coups étaient classés à 7,8 s, et le résultat final est arrivé à 35 s. 19 coups ont changé de classe entre les deux, par exemple 14. erreur → imprécision.
+     - La barre de progression est continue. Le premier rendu en occupe le début, en proportion de son coût : 1 / (1 + 1,5^(profondeur − 14)).
+   - **Notification de fin** : « Analyse complète terminée », en bas à droite pendant 5 s (`notify`, app.js). Si l'onglet est en arrière-plan, une coche s'ajoute au titre de l'onglet. Il n'y a pas de notification quand l'analyse a pris moins de 4 s (partie rouverte depuis la mémoire).
+   - **Coup testé** sur l'échiquier : analysé au plus à profondeur 18, pour répondre en quelques secondes.
    - **Mémoires** : une position déjà connue n'est pas recalculée.
      - En mémoire vive, par FEN (4 premiers champs) et nombre de variantes.
      - Dans le navigateur (IndexedDB), d'une visite à l'autre ; voir « Temps d'analyse ».
      - Dans le fichier `data/ouvertures.json`, précalculé une fois pour toutes ; voir « Temps d'analyse ».
      - Une évaluation plus profonde que demandé est réutilisée telle quelle.
 3. `refine()` : **propagation arrière le long de la partie**. La valeur d'une position est le maximum entre la valeur du coup joué (celle de la position suivante, inversée) et les autres lignes MultiPV. Les scores de mat sont décalés d'un coup (`shift`).
-4. **Passe 2** (niveau Rapide seulement) : vérification à profondeur +4 des positions autour des coups « erreur, gaffe, occasion manquée, brillant, très bon » (24 positions au maximum), puis `refine()` et reconstruction des rapports. Elle coûte environ 70 % du travail et ne change presque plus rien à partir de la profondeur 16, d'où son absence dans les autres niveaux.
+4. **Plus de vérification des moments clés** : l'ancienne passe 2 revérifiait à profondeur +4 les positions autour des coups « erreur, gaffe, occasion manquée, brillant, très bon ». Elle coûtait environ 70 % du travail et ne change presque plus rien à partir de la profondeur 16 (mesures dans « Temps d'analyse ») ; elle a été retirée le 15 octobre 2026.
 5. `buildSummary()` : précision, performance, phases, moments clés, thèmes.
+6. **Comparatif des profondeurs** (Xazouille – Proko91, 53 positions, 4 moteurs, MultiPV 3) :
+
+   | Profondeur | Travail (millions de nœuds) | Temps, PC libre | Partie de 40 coups |
+   |---|---|---|---|
+   | 15 | 15 | 12 s | 20 s |
+   | 17 | 31 | 26 s | 40 s |
+   | 18 | 49 | 41 s | 1 min |
+   | 19 | 77 | 1 min 04 | 1 min 40 |
+   | 20 | 110 | 1 min 32 | 2 min 20 |
+
+   - Chaque profondeur de plus coûte environ 1,5 fois plus.
+   - Les temps sont calculés à 1,2 million de nœuds par seconde, la vitesse mesurée quand le PC était libre (mesures directes : 12 s à 15, 60 s à 19, 90 s à 20). Avec une autre application gourmande ouverte (un jeu, par exemple), les mesures ont été jusqu'à deux fois plus lentes.
+   - Lancer les positions les plus difficiles en premier (repérées par le passage à 14) a semblé réduire la fin d'analyse où un seul moteur travaille (profondeur 18 : 73 s au lieu de 94 à 109 s). Mais ces mesures ont été faites avec le PC occupé par ailleurs : à confirmer avant de l'adopter.
 
 ### Moteur : pourquoi Stockfish 19 complet (14 octobre 2026)
 - **Données du banc d'essai** : 170 coups de 2 parties de xazouille, 8 moteurs mono-thread en parallèle.
@@ -457,6 +474,7 @@ Elle compare la position avant et après le coup, avec le mini-modèle de `posit
      - Le livre du site fournit 596 positions (172 lignes).
      - S'y ajoutent les positions jouées au moins deux fois dans les 16 premiers demi-coups des 484 dernières parties de Xazouille.
      - Le fichier est chargé une fois, puis mis en cache par le navigateur. Dès la toute première analyse, ces positions ne sont pas recalculées.
+     - Il sert aux niveaux Rapide (16) et Standard (18), et au premier rendu à 14. Il ne sert pas au niveau Approfondie (20), plus profond que lui : pour cela, il faudrait le recalculer à 20 (environ 25 à 30 min de calcul).
      - Ces évaluations sont plus profondes que celles des niveaux : le premier coup hors de ces positions compare une évaluation à 18 et une autre à la profondeur du niveau. L'effet est faible, ces positions étant équilibrées.
    - **Nouveaux niveaux**, sur une partie de 27 demi-coups, avec 4 moteurs et la mémoire vide :
      - Rapide (12, moments clés à 16) : 7,4 s ;
