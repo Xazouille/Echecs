@@ -1,10 +1,12 @@
 # Coup par Coup
 
-Analyse tes parties Chess.com avec Stockfish 17.1. Chaque coup est expliqué en français : ce qu'il fait, pourquoi il perd, quelle tactique a été manquée et si elle était à la portée du joueur.
+Analyse tes parties Chess.com avec Stockfish 19. Chaque coup est expliqué en français : ce qu'il fait, pourquoi il perd, quelle tactique a été manquée et si elle était à la portée du joueur.
 
 ## Utiliser le site en ligne
 
-**https://TON-PSEUDO-GITHUB.github.io/coup-par-coup/** (lien à mettre à jour après la publication)
+**https://xazouille.github.io/Echecs/**
+
+Au premier passage, le navigateur télécharge le moteur complet (environ 80 Mo) : la première analyse démarre donc plus lentement, ensuite il reste en mémoire.
 
 Entre ton pseudo Chess.com, choisis une partie, puis clique sur « Analyser ». L'analyse tourne dans ton navigateur : rien n'est envoyé ailleurs qu'à l'API publique de Chess.com pour récupérer tes parties.
 
@@ -18,7 +20,12 @@ Entre ton pseudo Chess.com, choisis une partie, puis clique sur « Analyser ». 
 - **Bilan** : précision, performance estimée, précision par phase, moments clés et conseils pour progresser.
 - **Exploration** : clique sur une pièce pour tester ton propre coup. Il est analysé et expliqué comme les coups de la partie.
 
-Les coups décisifs sont revérifiés plus profondément à la fin de l'analyse.
+Trois niveaux d'analyse :
+- **Rapide** : profondeur 12, les moments clés étant revérifiés à 16 ;
+- **Standard** : profondeur 15 ;
+- **Approfondie** : profondeur 17, avec un premier aperçu à 14 affiché en attendant.
+
+L'analyse utilise jusqu'à 4 cœurs du processeur. Les positions déjà analysées sont gardées dans le navigateur, et les ouvertures les plus jouées sont fournies déjà calculées (`data/ouvertures.json`) : elles ne sont jamais recalculées.
 
 ## Lancer le site sur son ordinateur (sans internet pour le site lui-même)
 
@@ -40,14 +47,16 @@ Aucune installation n'est nécessaire : le serveur local est un script PowerShel
   - `js/explain.js` : reconnaissance des motifs tactiques
   - `js/analysis.js` : classement des coups, précision, bilan
   - `js/commentary.js` : rédaction des commentaires
-  - `vendor/` : Stockfish 17.1, chess.js, pièces « cburnett »
+  - `js/engine.js` : pilote de Stockfish (plusieurs moteurs en parallèle)
+  - `data/ouvertures.json` : évaluations précalculées des ouvertures les plus jouées
+  - `vendor/` : Stockfish 19 (complet, et lite en secours), chess.js, pièces « cburnett »
 - `server.ps1` / `Lancer.bat` : serveur local Windows
 - `serveur-mac.pl` / `Lancer-Mac.command` : serveur local Mac
 - `NOTES-DEV.md` : notes de développement détaillées
 
 ## Crédits et licences
 
-- [Stockfish](https://stockfishchess.org) 17.1, version WebAssembly [stockfish.js](https://github.com/nmrugg/stockfish.js) : GPLv3 (texte complet dans `docs/vendor/stockfish/Copying.txt`)
+- [Stockfish](https://stockfishchess.org) 19, version WebAssembly [stockfish.js](https://github.com/nmrugg/stockfish.js) : GPLv3 (texte complet dans `docs/vendor/stockfish/Copying.txt`)
 - [chess.js](https://github.com/jhlywa/chess.js) 1.4.0 : licence BSD-2-Clause
 - Pièces « cburnett » de Colin M.L. Burnett, via [chessground](https://github.com/lichess-org/chessground) : GPLv2+
 - Données des parties : [API publique de Chess.com](https://www.chess.com/news/view/published-data-api)

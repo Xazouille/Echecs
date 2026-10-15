@@ -418,9 +418,12 @@ function setProgress(done, total, phase = 'scan') {
   const an = state.analysis;
   $('progress').classList.toggle('is-done', !!(an && an.done));
   $('progress').classList.toggle('is-check', phase === 'check');
+  const mode = an ? an.mode : null;
   let text = `Analyse ${done} / ${total} positions · profondeur ${an ? an.depth : ''}`;
-  if (phase === 'check') text = `Vérification des moments clés ${done} / ${total} · profondeur ${an.depth + 4}`;
-  if (an && an.done) text = `Analyse terminée · profondeur ${an.depth}, moments clés à ${an.depth + 4}`;
+  if (phase === 'preview') text = `Premier aperçu ${done} / ${total} · profondeur ${mode.preview}`;
+  else if (phase === 'scan' && mode && mode.preview) text = `Aperçu affiché · approfondissement ${done} / ${total} · profondeur ${an.depth}`;
+  else if (phase === 'check') text = `Vérification des moments clés ${done} / ${total} · profondeur ${an.depth + mode.check}`;
+  if (an && an.done) text = `Analyse terminée · profondeur ${an.depth}${mode.check ? `, moments clés à ${an.depth + mode.check}` : ''}`;
   $('progressText').textContent = text;
 }
 

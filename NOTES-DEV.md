@@ -72,9 +72,24 @@ Chaque `.js` cherche le `.wasm` du même nom : ne renommer l'un qu'avec l'autre.
 
 ### Pipeline (`GameAnalysis.run`, analysis.js)
 1. `parseGame(pgn)` : coups (verbose chess.js avec `before`/`after`), FEN de chaque position, pendules `%clk`, cadence, profondeur de « livre ».
-2. **Passe 1** : chaque position est analysée à la profondeur choisie (10, 12 ou 15), MultiPV 3. Les résultats sont mis en cache par FEN (4 premiers champs). Le rapport du coup *i* est construit dès que les positions *i* et *i+1* sont connues, d'où l'affichage progressif.
+2. **Passe 1** : chaque position est analysée à la profondeur du niveau choisi, MultiPV 3, par 4 moteurs en parallèle (`EnginePool`). Le rapport du coup *i* est construit dès que les positions *i* et *i+1* sont connues, d'où l'affichage progressif.
+   - **Niveaux** (`MODES`, analysis.js, 15 octobre 2026) :
+
+     | Niveau | Profondeur | Moments clés | Premier aperçu |
+     |---|---|---|---|
+     | Rapide | 12 | revérifiés à 16 | – |
+     | Standard | 15 | – | – |
+     | Approfondie | 17 | – | à 14 |
+
+   - « Rapide » est l'ancien « Standard », sur lequel la précision a été calée (anciens niveaux : 10, 12 et 15, avec vérification à +4).
+   - **Aperçu** (Approfondie) : toute la partie est d'abord analysée à 14 et affichée. Les résultats à 17 sont gardés à part et remplacent l'aperçu d'un coup, à la fin : on ne mélange jamais deux profondeurs à l'écran.
+   - **Mémoires** : une position déjà connue n'est pas recalculée.
+     - En mémoire vive, par FEN (4 premiers champs) et nombre de variantes.
+     - Dans le navigateur (IndexedDB), d'une visite à l'autre ; voir « Temps d'analyse ».
+     - Dans le fichier `data/ouvertures.json`, précalculé une fois pour toutes ; voir « Temps d'analyse ».
+     - Une évaluation plus profonde que demandé est réutilisée telle quelle.
 3. `refine()` : **propagation arrière le long de la partie**. La valeur d'une position est le maximum entre la valeur du coup joué (celle de la position suivante, inversée) et les autres lignes MultiPV. Les scores de mat sont décalés d'un coup (`shift`).
-4. **Passe 2** : vérification à profondeur +4 des positions autour des coups « erreur, gaffe, occasion manquée, brillant, très bon » (24 positions au maximum), puis `refine()` et reconstruction des rapports.
+4. **Passe 2** (niveau Rapide seulement) : vérification à profondeur +4 des positions autour des coups « erreur, gaffe, occasion manquée, brillant, très bon » (24 positions au maximum), puis `refine()` et reconstruction des rapports. Elle coûte environ 70 % du travail et ne change presque plus rien à partir de la profondeur 16, d'où son absence dans les autres niveaux.
 5. `buildSummary()` : précision, performance, phases, moments clés, thèmes.
 
 ### Moteur : pourquoi Stockfish 19 complet (14 octobre 2026)
@@ -435,7 +450,18 @@ Elle compare la position avant et après le coup, avec le mini-modèle de `posit
      - profondeur 12 : 8, 33 et 66 s ;
      - profondeur 16 (vérification à 20) : 72, 128 et 303 s.
    - Test de précision en profondeur 16 sur ces 3 parties : écart moyen avec Chess.com de **0,8 point** par joueur, contre 1,7 en profondeur 12. Mais 15 à 25 % des coups changent de classement, et l'échantillon est trop petit pour conclure. La formule de précision a été calée en profondeur 12.
-   - **Mémoire permanente des évaluations** (IndexedDB, `evaluate` dans analysis.js). Clé : moteur, position (FEN sans les compteurs), nombre de variantes. Une position déjà analysée à une profondeur suffisante n'est pas recalculée : rouvrir une partie prend 0 s au lieu de 5 s, et environ 10 % des positions reviennent d'une partie à l'autre (ouvertures). Au plus 60 000 positions sont gardées ; les plus anciennes sont oubliées.
+   - **Mémoire permanente des évaluations** (IndexedDB, `evaluate` dans analysis.js). Clé : moteur, position (FEN sans les compteurs), nombre de variantes. Une position déjà analysée à une profondeur suffisante n'est pas recalculée : rouvrir une partie prend 0 s au lieu de 5 s, et environ 10 % des positions reviennent d'une partie à l'autre (ouvertures).
+     - Poids : environ 400 octets par position, les variantes étant coupées à 12 coups. Cela fait 25 Ko par partie et 24 Mo au plus pour 60 000 positions (environ 1 000 parties).
+     - Au-delà, les positions les plus anciennes sont oubliées. Le quota du navigateur est de plusieurs Go.
+   - **Ouvertures précalculées** (`data/ouvertures.json`) : environ 1 000 positions analysées en profondeur 18 avec Stockfish 19 complet, MultiPV 3, variantes coupées à 12 coups.
+     - Le livre du site fournit 596 positions (172 lignes).
+     - S'y ajoutent les positions jouées au moins deux fois dans les 16 premiers demi-coups des 484 dernières parties de Xazouille.
+     - Le fichier est chargé une fois, puis mis en cache par le navigateur. Dès la toute première analyse, ces positions ne sont pas recalculées.
+     - Ces évaluations sont plus profondes que celles des niveaux : le premier coup hors de ces positions compare une évaluation à 18 et une autre à la profondeur du niveau. L'effet est faible, ces positions étant équilibrées.
+   - **Nouveaux niveaux**, sur une partie de 27 demi-coups, avec 4 moteurs et la mémoire vide :
+     - Rapide (12, moments clés à 16) : 7,4 s ;
+     - Standard (15) : 5,7 s ;
+     - Approfondie (17, aperçu à 14) : 19,2 s, l'aperçu étant immédiat car les positions venaient d'être analysées à 15.
    - **Où va le temps** (Xazouille – Proko91, 53 demi-coups, en millions de nœuds, ce qui ne dépend pas de la chauffe du processeur) :
 
      | Réglage | 1er passage | Vérification | Coups reclassés |

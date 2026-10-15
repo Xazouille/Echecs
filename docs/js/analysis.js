@@ -8,9 +8,19 @@ import * as fr from './fr.js';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
-// Stockfish 19 cherche bien plus que 17.1 à profondeur égale : 12 avec le 19 complet prend environ
-// deux fois le temps de 15 avec l'ancien 17.1 lite, pour une évaluation nettement plus juste.
-export const DEPTHS = { rapide: 10, standard: 12, approfondie: 15 };
+// Réglages d'analyse (15 octobre 2026). `depth` : profondeur du passage sur toutes les positions.
+// `check` : profondeur ajoutée pour revérifier les moments clés (0 = pas de vérification).
+// `preview` : premier rendu rapide à cette profondeur, affiché pendant l'approfondissement.
+// Mesures (Xazouille – Proko91, 53 demi-coups, 4 moteurs) : la vérification à +4 représente
+// environ 70 % du travail. Elle est utile à profondeur 12 (sans elle, 7 coups reclassés et
+// −1,3 point de précision), mais ne change presque plus rien à partir de 16 (2 coups sur 53).
+// « Rapide » reprend l'ancien « Standard », sur lequel la précision a été calée.
+export const MODES = {
+  rapide: { depth: 12, check: 4 },
+  standard: { depth: 15, check: 0 },
+  approfondie: { depth: 17, check: 0, preview: 14 },
+};
+export const DEPTHS = Object.fromEntries(Object.entries(MODES).map(([k, m]) => [k, m.depth]));
 
 export const CLASSES = {
   brilliant: { label: 'Brillant', phrase: 'un coup brillant', glyph: '!!' },
@@ -192,7 +202,33 @@ function dbPrune(db) {
   };
 }
 
+// Les explications n'utilisent que les 12 premiers coups d'une variante : on ne garde pas le reste.
+const PV_KEEP = 12;
+const trimLines = (lines) => lines.map((l) => ({ score: l.score, pv: l.pv.slice(0, PV_KEEP), depth: l.depth }));
+
+// Évaluations précalculées des ouvertures les plus jouées (data/ouvertures.json, Stockfish 19 complet,
+// profondeur 18) : le livre d'ouvertures du site et les positions qui reviennent dans les parties de
+// Xazouille. Chargées une fois, elles évitent de recalculer les premiers coups de la plupart des
+// parties, même à la toute première analyse.
+let openingsPromise = null;
+function loadOpenings() {
+  if (!openingsPromise) {
+    openingsPromise = fetch(new URL('../data/ouvertures.json', import.meta.url))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        for (const [pos, lines] of Object.entries(data.positions)) {
+          const key = `${pos}|${data.multipv}`;
+          if (!cache.has(key)) cache.set(key, { fen: pos, lines, depth: data.depth });
+        }
+      })
+      .catch(() => {});
+  }
+  return openingsPromise;
+}
+
 export async function evaluate(engine, fen, { depth, priority = false, tag = '', lane, multipv = 3 }) {
+  await loadOpenings();
   const hit = cachedEval(fen, depth, multipv);
   if (hit) return hit;
   const key = fenKey(fen, multipv);
@@ -207,7 +243,7 @@ export async function evaluate(engine, fen, { depth, priority = false, tag = '',
   if (!res) return null;
   const out = { fen, lines: res.lines, depth: res.depth };
   cache.set(key, out);
-  if (dbKey && res.lines.length) dbPut(dbKey, { lines: res.lines, depth: res.depth });
+  if (dbKey && res.lines.length) dbPut(dbKey, { lines: trimLines(res.lines), depth: res.depth });
   return out;
 }
 
@@ -380,8 +416,12 @@ export class GameAnalysis {
     this.tag = `partie-${Date.now()}`;
   }
 
+  get mode() {
+    return MODES[this.settings.depth] || MODES.standard;
+  }
+
   get depth() {
-    return DEPTHS[this.settings.depth] || DEPTHS.standard;
+    return this.mode.depth;
   }
 
   levelFor(color) {
@@ -402,44 +442,71 @@ export class GameAnalysis {
     this.engine.cancelAll((job) => job.tag === this.tag);
   }
 
-  // onUpdate(fait, total, phase) — phase : 'scan' (première passe) ou 'check' (vérification).
-  // Toutes les positions sont confiées d'un coup au moteur. Avec un groupe de moteurs (EnginePool),
-  // elles sont analysées en parallèle, la partie étant découpée en couloirs de positions voisines.
-  async run(onUpdate) {
+  // Évalue toutes les positions à `depth` et range les résultats dans `target`. Toutes les positions
+  // sont confiées d'un coup au moteur : avec un groupe de moteurs (EnginePool), elles sont analysées
+  // en parallèle, la partie étant découpée en couloirs de positions voisines. `live` : les rapports
+  // sont construits au fur et à mesure (sinon, à la fin). Renvoie false si l'analyse a été annulée.
+  async scan(depth, target, live, onUpdate, phase) {
     const n = this.game.fens.length;
     const lanes = this.engine.size || 1;
     let done = 0;
     let stop = false;
     await Promise.all(this.game.fens.map((fen, i) => evaluate(this.engine, fen, {
-      depth: this.depth, tag: this.tag, lane: Math.floor((i * lanes) / n),
+      depth, tag: this.tag, lane: Math.floor((i * lanes) / n),
     }).then((res) => {
       if (this.cancelled || !res) { stop = true; return; }
-      this.positions[i] = res;
-      if (i >= 1 && this.positions[i - 1]) this.buildReport(i - 1);
-      if (i + 1 < n && this.positions[i + 1]) this.buildReport(i);
-      onUpdate(++done, n, 'scan');
+      target[i] = res;
+      if (live) {
+        if (i >= 1 && target[i - 1]) this.buildReport(i - 1);
+        if (i + 1 < n && target[i + 1]) this.buildReport(i);
+      }
+      onUpdate(++done, n, phase);
     })));
-    if (stop || this.cancelled) return;
+    return !stop && !this.cancelled;
+  }
+
+  // onUpdate(fait, total, phase) — phase : 'preview' (premier rendu rapide), 'scan' (passage
+  // principal), 'check' (vérification des moments clés) ou 'done'.
+  async run(onUpdate) {
+    const mode = this.mode;
+    const n = this.game.fens.length;
+    if (mode.preview) {
+      // Premier rendu rapide, affiché pendant l'approfondissement. Les résultats profonds sont gardés
+      // à part et remplacent l'aperçu d'un coup, à la fin : pas de mélange de profondeurs à l'écran.
+      if (!await this.scan(mode.preview, this.positions, true, onUpdate, 'preview')) return;
+      this.refine();
+      this.rebuild();
+      const deep = new Array(n).fill(null);
+      onUpdate(0, n, 'scan');
+      if (!await this.scan(mode.depth, deep, false, onUpdate, 'scan')) return;
+      this.positions = deep;
+    } else if (!await this.scan(mode.depth, this.positions, true, onUpdate, 'scan')) {
+      return;
+    }
     this.refine();
     this.rebuild();
 
-    // Les coups qui changent le cours de la partie sont revérifiés plus profondément.
-    const critical = new Set();
-    this.reports.forEach((r, i) => {
-      if (['mistake', 'blunder', 'miss', 'brilliant', 'great'].includes(r.cls)) { critical.add(i); critical.add(i + 1); }
-    });
-    const todo = [...critical].filter((i) => !this.positions[i].terminal).slice(0, 24);
-    let checked = 0;
-    onUpdate(0, todo.length, 'check');
-    await Promise.all(todo.map((i, k) => evaluate(this.engine, this.game.fens[i], {
-      depth: this.depth + 4, tag: this.tag, lane: Math.floor((k * lanes) / todo.length),
-    }).then((res) => {
-      if (this.cancelled || !res) { stop = true; return; }
-      this.positions[i] = res;
-      onUpdate(++checked, todo.length, 'check');
-    })));
-    if (stop || this.cancelled) return;
-    this.refine();
+    if (mode.check) {
+      // Les coups qui changent le cours de la partie sont revérifiés plus profondément.
+      const lanes = this.engine.size || 1;
+      const critical = new Set();
+      this.reports.forEach((r, i) => {
+        if (['mistake', 'blunder', 'miss', 'brilliant', 'great'].includes(r.cls)) { critical.add(i); critical.add(i + 1); }
+      });
+      const todo = [...critical].filter((i) => !this.positions[i].terminal).slice(0, 24);
+      let checked = 0;
+      let stop = false;
+      onUpdate(0, todo.length, 'check');
+      await Promise.all(todo.map((i, k) => evaluate(this.engine, this.game.fens[i], {
+        depth: mode.depth + mode.check, tag: this.tag, lane: Math.floor((k * lanes) / todo.length),
+      }).then((res) => {
+        if (this.cancelled || !res) { stop = true; return; }
+        this.positions[i] = res;
+        onUpdate(++checked, todo.length, 'check');
+      })));
+      if (stop || this.cancelled) return;
+      this.refine();
+    }
     this.done = true;
     this.rebuild();
     onUpdate(n, n, 'done');
