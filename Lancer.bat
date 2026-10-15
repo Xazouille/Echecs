@@ -3,7 +3,7 @@ title Coup par Coup
 cd /d "%~dp0"
 
 if not exist "%~dp0server.ps1" goto incomplet
-if not exist "%~dp0docs\index.html" goto incomplet
+if not exist "%~dp0public\index.html" goto incomplet
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server.ps1"
 echo.
@@ -14,7 +14,7 @@ exit /b
 
 :incomplet
 echo.
-echo  Il manque des fichiers a cote de Lancer.bat (server.ps1 ou le dossier docs).
+echo  Il manque des fichiers a cote de Lancer.bat (server.ps1 ou le dossier public).
 echo.
 echo  Si tu as telecharge le dossier depuis Google Drive, c'est un fichier .zip :
 echo    1. Ferme cette fenetre.

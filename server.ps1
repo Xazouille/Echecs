@@ -1,7 +1,7 @@
 <#
   Coup par Coup - serveur de fichiers local
 
-  Ce script sert uniquement les fichiers du dossier docs/ a l'adresse http://localhost:8765.
+  Ce script sert uniquement les fichiers du dossier public/ a l'adresse http://localhost:8765.
   Il ne telecharge rien et n'accepte que les connexions de cet ordinateur.
   Les parties sont recuperees par le navigateur, directement sur l'API publique de Chess.com.
 
@@ -15,7 +15,7 @@ param(
   [switch]$NoBrowser
 )
 
-$Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'docs'))
+$Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'public'))
 
 $Types = @{
   '.html' = 'text/html; charset=utf-8'
