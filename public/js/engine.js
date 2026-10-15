@@ -46,11 +46,13 @@ export class Engine {
   init() {
     if (this.ready) return this.ready;
     const lite = () => this.start('vendor/stockfish/stockfish-19-lite-single.js', 1, 'Stockfish 19 lite (mode de secours)');
-    this.ready = this.start('vendor/stockfish/stockfish-19-single.js', 1).catch(lite);
+    // En ligne, le premier téléchargement du réseau complet (environ 80 Mo compressés) dépasse
+    // souvent une minute : on lui laisse 5 minutes avant de passer à la version lite.
+    this.ready = this.start('vendor/stockfish/stockfish-19-single.js', 1, 'Stockfish 19', 300000).catch(lite);
     return this.ready;
   }
 
-  start(file, threads, name = 'Stockfish 19') {
+  start(file, threads, name = 'Stockfish 19', timeout = 60000) {
     return new Promise((resolve, reject) => {
       let settled = false;
       const fail = (msg) => {
@@ -62,8 +64,8 @@ export class Engine {
         this.waiters = [];
         reject(new Error(msg));
       };
-      // Le réseau complet (99 Mo) peut mettre plusieurs secondes à se charger.
-      const timer = setTimeout(() => fail('Le moteur ne répond pas.'), 60000);
+      // Le réseau complet (99 Mo) peut mettre plusieurs secondes, voire minutes en ligne, à se charger.
+      const timer = setTimeout(() => fail('Le moteur ne répond pas.'), timeout);
       try {
         this.worker = new Worker(file);
       } catch (err) {
