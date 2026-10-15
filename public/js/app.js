@@ -1,6 +1,6 @@
 // Interface : recherche Chess.com, liste des parties, revue d'une partie.
 import { Chess } from '../vendor/chess.js';
-import { Engine } from './engine.js';
+import { EnginePool } from './engine.js';
 import {
   parseGame, GameAnalysis, makeReport, evaluate, cachedEval, whiteWin, whiteEvalText,
   CLASSES, CLASS_ORDER, LEVELS, DEPTHS, levelForElo, thresholds,
@@ -56,7 +56,7 @@ const CLASS_DESC = {
 };
 
 const state = {
-  engine: new Engine(),
+  engine: new EnginePool(),
   settings: {
     depth: store.get('depth', 'standard'),
     level: store.get('level', 'auto'),
@@ -419,7 +419,7 @@ function setProgress(done, total, phase = 'scan') {
   $('progress').classList.toggle('is-done', !!(an && an.done));
   $('progress').classList.toggle('is-check', phase === 'check');
   let text = `Analyse ${done} / ${total} positions · profondeur ${an ? an.depth : ''}`;
-  if (phase === 'check') text = `Vérification des moments clés ${done + 1} / ${total} · profondeur ${an.depth + 4}`;
+  if (phase === 'check') text = `Vérification des moments clés ${done} / ${total} · profondeur ${an.depth + 4}`;
   if (an && an.done) text = `Analyse terminée · profondeur ${an.depth}, moments clés à ${an.depth + 4}`;
   $('progressText').textContent = text;
 }

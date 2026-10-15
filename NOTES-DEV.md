@@ -429,7 +429,12 @@ Elle compare la position avant et après le coup, avec le mini-modèle de `posit
 
 ## 7. Limites connues
 
-1. **Temps d'analyse** : environ 1 à 1,5 min pour une partie de 45 coups en « Standard ». « Approfondie » (profondeur 15, vérification à 19) est beaucoup plus lent avec Stockfish 19 : plusieurs minutes. Un seul cœur est utilisé. Une piste serait d'analyser plusieurs positions en parallèle avec plusieurs moteurs mono-thread.
+1. **Temps d'analyse**. Depuis le 15 octobre 2026, `EnginePool` (engine.js) fait tourner jusqu'à 4 moteurs mono-thread en parallèle, sur des positions différentes. `GameAnalysis.run` leur confie toutes les positions d'un coup, la partie étant découpée en couloirs de positions voisines.
+   - 54 positions à profondeur 14 : 26,8 s avec 1 moteur, 7,5 s avec 4. Pas de gain au-delà de 4 sur un Core 5 210H.
+   - Mesure en conditions réelles, avec la vérification des moments clés, sur des parties de 27, 53 et 90 demi-coups :
+     - profondeur 12 : 8, 33 et 66 s ;
+     - profondeur 16 (vérification à 20) : 72, 128 et 303 s.
+   - Test de précision en profondeur 16 sur ces 3 parties : écart moyen avec Chess.com de **0,8 point** par joueur, contre 1,7 en profondeur 12. Mais 15 à 25 % des coups changent de classement, et l'échantillon est trop petit pour conclure. La formule de précision a été calée en profondeur 12.
 2. **Taille** : le moteur complet pèse 99 Mo, d'où un dossier du site d'environ 97 Mo. Le mode de secours (lite) est moins précis et n'a pas été calé.
 3. **Détection heuristique** :
    - la SEE tient compte des clouages et des échecs (voir « Détection des motifs »), mais ne compte pas la valeur d'une promotion dans un échange ;

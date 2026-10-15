@@ -73,6 +73,8 @@ export class Engine {
         return;
       }
       this.threads = threads;
+      this.file = file;
+      this.name = name;
       this.worker.onerror = (ev) => fail(ev.message || 'Le moteur n’a pas pu démarrer.');
       this.worker.onmessage = (ev) => this.onLine(String(ev.data));
       this.expect('uciok')
@@ -162,5 +164,94 @@ export class Engine {
       this.current.cancelled = true;
       this.send('stop');
     }
+  }
+}
+
+// Nombre de moteurs à faire tourner en même temps. Un moteur complet occupe environ 250 Mo de
+// mémoire ; on laisse des cœurs libres pour le navigateur et le système. Mesuré le 15 octobre 2026
+// (Core 5 210H, 54 positions à profondeur 14) : 1 moteur 26,8 s, 2 → 15,2 s, 4 → 7,5 s,
+// 6 → 7,1 s, 8 → 7,2 s. Au-delà de 4, le gain est nul : on s'arrête à 4.
+function poolSize() {
+  const cores = navigator.hardwareConcurrency || 2;
+  const mem = navigator.deviceMemory || 4; // en Go, plafonné à 8 par le navigateur
+  return Math.max(1, Math.min(cores - 2, Math.floor(mem / 1.5), 4));
+}
+
+// Plusieurs moteurs mono-thread qui analysent des positions différentes en même temps : sur un
+// processeur à plusieurs cœurs, une partie s'analyse d'autant plus vite. Chaque moteur garde les
+// réglages calés (mono-thread, même profondeur) : les évaluations restent celles d'un moteur seul.
+// Même interface que `Engine` (init, analyze, cancelAll).
+export class EnginePool {
+  constructor(size = poolSize()) {
+    this.size = size;
+    this.engines = [];
+    this.idle = [];
+    this.queue = [];
+    this.ready = null;
+    this.label = 'Stockfish 19';
+  }
+
+  init() {
+    if (this.ready) return this.ready;
+    const first = new Engine();
+    this.ready = first.init().then(() => {
+      this.add(first);
+      this.label = this.size > 1 ? `${first.name} · ${this.size} moteurs en parallèle` : first.label;
+      // Les autres moteurs démarrent ensuite, le fichier étant déjà en cache. Un échec n'empêche
+      // rien : les moteurs prêts se partagent le travail.
+      for (let k = 1; k < this.size; k++) {
+        const e = new Engine();
+        e.start(first.file, 1, first.name, 120000).then(() => this.add(e), () => {});
+      }
+      return this;
+    });
+    return this.ready;
+  }
+
+  add(e) {
+    e.lane = this.engines.length;
+    this.engines.push(e);
+    this.idle.push(e);
+    this.dispatch();
+  }
+
+  // `lane` (facultatif) : couloir préféré. Des positions voisines dans le même couloir vont au même
+  // moteur, qui réutilise ce qu'il vient de calculer.
+  analyze(fen, opts = {}) {
+    return new Promise((resolve) => {
+      const job = { fen, opts, resolve, tag: opts.tag || '' };
+      if (opts.priority) this.queue.unshift(job);
+      else this.queue.push(job);
+      this.dispatch();
+    });
+  }
+
+  dispatch() {
+    while (this.idle.length && this.queue.length) {
+      const e = this.idle.shift();
+      let k = this.queue.findIndex((j) => j.opts.priority);
+      if (k < 0) k = this.queue.findIndex((j) => j.opts.lane === e.lane);
+      if (k < 0) k = 0;
+      const [job] = this.queue.splice(k, 1);
+      e.analyze(job.fen, job.opts).then((res) => {
+        this.idle.push(e);
+        job.resolve(res);
+        this.dispatch();
+      });
+    }
+  }
+
+  cancelAll(filter = () => true) {
+    const keep = [];
+    for (const job of this.queue) {
+      if (filter(job)) job.resolve(null);
+      else keep.push(job);
+    }
+    this.queue = keep;
+    for (const e of this.engines) e.cancelAll(filter);
+  }
+
+  terminate() {
+    for (const e of this.engines) if (e.worker) e.worker.terminate();
   }
 }

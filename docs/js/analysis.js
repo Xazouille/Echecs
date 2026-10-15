@@ -126,10 +126,10 @@ export function cachedEval(fen, depth = 0) {
   return hit && hit.depth >= depth ? hit : null;
 }
 
-export async function evaluate(engine, fen, { depth, priority = false, tag = '' }) {
+export async function evaluate(engine, fen, { depth, priority = false, tag = '', lane }) {
   const hit = cachedEval(fen, depth);
   if (hit) return hit;
-  const res = await engine.analyze(fen, { depth, multipv: 3, priority, tag });
+  const res = await engine.analyze(fen, { depth, multipv: 3, priority, tag, lane });
   if (!res) return null;
   const out = { fen, lines: res.lines, depth: res.depth };
   cache.set(fenKey(fen), out);
@@ -328,16 +328,23 @@ export class GameAnalysis {
   }
 
   // onUpdate(fait, total, phase) — phase : 'scan' (première passe) ou 'check' (vérification).
+  // Toutes les positions sont confiées d'un coup au moteur. Avec un groupe de moteurs (EnginePool),
+  // elles sont analysées en parallèle, la partie étant découpée en couloirs de positions voisines.
   async run(onUpdate) {
     const n = this.game.fens.length;
-    for (let i = 0; i < n; i++) {
-      if (this.cancelled) return;
-      const res = await evaluate(this.engine, this.game.fens[i], { depth: this.depth, tag: this.tag });
-      if (this.cancelled || !res) return;
+    const lanes = this.engine.size || 1;
+    let done = 0;
+    let stop = false;
+    await Promise.all(this.game.fens.map((fen, i) => evaluate(this.engine, fen, {
+      depth: this.depth, tag: this.tag, lane: Math.floor((i * lanes) / n),
+    }).then((res) => {
+      if (this.cancelled || !res) { stop = true; return; }
       this.positions[i] = res;
-      if (i >= 1) this.buildReport(i - 1);
-      onUpdate(i + 1, n, 'scan');
-    }
+      if (i >= 1 && this.positions[i - 1]) this.buildReport(i - 1);
+      if (i + 1 < n && this.positions[i + 1]) this.buildReport(i);
+      onUpdate(++done, n, 'scan');
+    })));
+    if (stop || this.cancelled) return;
     this.refine();
     this.rebuild();
 
@@ -347,14 +354,16 @@ export class GameAnalysis {
       if (['mistake', 'blunder', 'miss', 'brilliant', 'great'].includes(r.cls)) { critical.add(i); critical.add(i + 1); }
     });
     const todo = [...critical].filter((i) => !this.positions[i].terminal).slice(0, 24);
-    for (let k = 0; k < todo.length; k++) {
-      if (this.cancelled) return;
-      onUpdate(k, todo.length, 'check');
-      const i = todo[k];
-      const res = await evaluate(this.engine, this.game.fens[i], { depth: this.depth + 4, tag: this.tag });
-      if (this.cancelled || !res) return;
+    let checked = 0;
+    onUpdate(0, todo.length, 'check');
+    await Promise.all(todo.map((i, k) => evaluate(this.engine, this.game.fens[i], {
+      depth: this.depth + 4, tag: this.tag, lane: Math.floor((k * lanes) / todo.length),
+    }).then((res) => {
+      if (this.cancelled || !res) { stop = true; return; }
       this.positions[i] = res;
-    }
+      onUpdate(++checked, todo.length, 'check');
+    })));
+    if (stop || this.cancelled) return;
     this.refine();
     this.done = true;
     this.rebuild();
