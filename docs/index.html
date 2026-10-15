@@ -33,7 +33,7 @@
     <!-- Accueil -->
     <section id="home" class="view home">
       <div class="hero">
-        <p class="eyebrow">Analyse de parties · Stockfish 17.1</p>
+        <p class="eyebrow">Analyse de parties · Stockfish 19</p>
         <h1>Comprends chaque coup de tes parties.</h1>
         <p class="lede">Entre ton pseudo Chess.com : le moteur analyse la partie, puis chaque coup est expliqué en français. Ce qu’il menace, pourquoi il perd, quelle tactique tu as laissée passer et si elle était à ta portée.</p>
       </div>
@@ -51,9 +51,9 @@
         <label class="field">
           <span>Profondeur d’analyse</span>
           <select id="depthSel">
-            <option value="rapide">Rapide · profondeur 12</option>
-            <option value="standard">Standard · profondeur 15</option>
-            <option value="approfondie">Approfondie · profondeur 18</option>
+            <option value="rapide">Rapide · profondeur 10</option>
+            <option value="standard">Standard · profondeur 12</option>
+            <option value="approfondie">Approfondie · profondeur 15</option>
           </select>
         </label>
         <label class="field">
@@ -130,6 +130,7 @@
             <span class="controls-sep"></span>
             <button type="button" class="icon-btn" data-nav="flip" aria-label="Retourner l’échiquier" title="Retourner l’échiquier"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3l-3 3.5h2.2V14h1.6V6.5H9zM14 17l3-3.5h-2.2V6h-1.6v7.5H11z"/></svg></button>
             <label class="toggle"><input type="checkbox" id="arrowsChk" checked> Flèches</label>
+            <label class="toggle"><input type="checkbox" id="soundChk" checked> Sons</label>
           </div>
           <div class="graph" id="graph" tabindex="0" aria-label="Courbe d’évaluation : clique pour aller à un coup"></div>
         </div>
@@ -157,7 +158,7 @@
   </main>
 
   <footer class="footer">
-    <p>Analyse locale avec Stockfish 17.1 (WebAssembly, GPLv3) · Pièces « cburnett » · Données publiques de Chess.com. Les explications sont générées automatiquement à partir des variantes du moteur.</p>
+    <p>Analyse locale avec Stockfish 19 (WebAssembly, GPLv3) · Pièces « cburnett » · Données publiques de Chess.com. Les explications sont générées automatiquement à partir des variantes du moteur.</p>
   </footer>
 
   <script type="module" src="js/app.js"></script>

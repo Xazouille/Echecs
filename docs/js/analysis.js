@@ -8,7 +8,9 @@ import * as fr from './fr.js';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
-export const DEPTHS = { rapide: 12, standard: 15, approfondie: 18 };
+// Stockfish 19 cherche bien plus que 17.1 à profondeur égale : 12 avec le 19 complet prend environ
+// deux fois le temps de 15 avec l'ancien 17.1 lite, pour une évaluation nettement plus juste.
+export const DEPTHS = { rapide: 10, standard: 12, approfondie: 15 };
 
 export const CLASSES = {
   brilliant: { label: 'Brillant', phrase: 'un coup brillant', glyph: '!!' },
@@ -26,10 +28,10 @@ export const CLASSES = {
 export const CLASS_ORDER = ['brilliant', 'great', 'best', 'excellent', 'good', 'book', 'inaccuracy', 'mistake', 'miss', 'blunder'];
 
 export const LEVELS = {
-  debutant: { label: 'Débutant', hint: 'moins de 1000', elo: 800, k: 1.4 },
-  intermediaire: { label: 'Intermédiaire', hint: '1000 à 1600', elo: 1300, k: 1.15 },
-  confirme: { label: 'Confirmé', hint: '1600 à 2000', elo: 1800, k: 1 },
-  expert: { label: 'Expert', hint: '2000 et plus', elo: 2200, k: 0.85 },
+  debutant: { label: 'Débutant', hint: 'moins de 1000', elo: 800, k: 1.2 },
+  intermediaire: { label: 'Intermédiaire', hint: '1000 à 1600', elo: 1300, k: 1 },
+  confirme: { label: 'Confirmé', hint: '1600 à 2000', elo: 1800, k: 0.9 },
+  expert: { label: 'Expert', hint: '2000 et plus', elo: 2200, k: 0.8 },
 };
 
 export function levelForElo(elo) {
@@ -42,19 +44,29 @@ export function levelForElo(elo) {
 
 export function thresholds(levelKey) {
   const k = LEVELS[levelKey].k;
-  return { excellent: 2 * k, good: 5 * k, inaccuracy: 10 * k, mistake: 20 * k };
+  return { excellent: 2 * k, good: 4 * k, inaccuracy: 8 * k, mistake: 15 * k };
 }
 
 // ---------- Évaluations ----------
 
 const stm = (fen) => fen.split(' ')[1];
 
-export function winPct(score) {
+function winCurve(score, k, clamp = 1000) {
   if (!score) return 50;
   if (score.mate !== undefined) return score.mate > 0 ? 100 : 0;
-  const cp = Math.max(-1000, Math.min(1000, score.cp));
-  return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+  const cp = Math.max(-clamp, Math.min(clamp, score.cp));
+  return 50 + 50 * (2 / (1 + Math.exp(-k * cp)) - 1);
 }
+
+// Chances de gain (Lichess) : barre d'évaluation, courbe et classement des coups.
+export const winPct = (score) => winCurve(score, 0.00368208);
+
+// Chances de gain utilisées pour la précision : courbe plus plate, calée sur Chess.com (voir « Précision »),
+// sans plafond à ±10 pions : sur cette courbe plate, le plafond écrasait les écarts dans les positions
+// gagnées et faisait passer « mat » contre « +10 » pour une grosse perte.
+// Les constantes ACC_* dépendent du moteur : elles sont à recaler si on change de version de Stockfish.
+const ACC_K = 0.00175;
+const accWinPct = (score) => winCurve(score, ACC_K, Infinity);
 
 export const negate = (s) => (s.mate !== undefined ? { mate: -s.mate } : { cp: -s.cp });
 
@@ -81,12 +93,14 @@ export function whiteScore(pos) {
   return stm(pos.fen) === 'w' ? s : negate(s);
 }
 
-export function whiteWin(pos) {
+function whiteChances(pos, curve) {
   if (!pos) return 50;
   if (pos.terminal === 'mate') return stm(pos.fen) === 'w' ? 0 : 100;
-  const p = winPct(scoreOf(pos));
+  const p = curve(scoreOf(pos));
   return stm(pos.fen) === 'w' ? p : 100 - p;
 }
+
+export const whiteWin = (pos) => whiteChances(pos, winPct);
 
 export function whiteEvalText(pos) {
   if (!pos) return '…';
@@ -182,9 +196,18 @@ export function parseGame(pgn, meta = {}) {
 
 // ---------- Classement d'un coup ----------
 
-function moveAccuracy(winBefore, winAfter) {
-  if (winAfter >= winBefore) return 100;
-  const raw = 103.1668100711649 * Math.exp(-0.04354415386753951 * (winBefore - winAfter)) - 3.166924740191411 + 1;
+// Précision d'un coup : même forme que Lichess, mais bien plus sévère (ACC_B au lieu de 0,0435),
+// sur la courbe de chances de gain plus plate `accWinPct`. Les pertes de moins de ACC_TOL points
+// sont ignorées : ce sont surtout des écarts de calcul entre notre moteur et celui de Chess.com.
+const ACC_B = 0.15;
+const ACC_TOL = 0.5;
+
+function moveAccuracy(before, after) {
+  const accBefore = accWinPct(scoreOf(before));
+  const accAfter = after.terminal === 'mate' ? 100 : after.terminal === 'draw' ? 50 : 100 - accWinPct(scoreOf(after));
+  const loss = accBefore - accAfter - ACC_TOL;
+  if (loss <= 0) return 100;
+  const raw = 103.1668100711649 * Math.exp(-ACC_B * loss) - 3.166924740191411 + 1;
   return Math.max(0, Math.min(100, raw));
 }
 
@@ -201,12 +224,14 @@ export function makeReport({ move, ply, before, after, prev = null, levelKey = '
   const tiedBest = loss <= 0.3 || (!!playedLine && winPct(playedLine.score) >= winBefore - 0.3);
   const forcedMate = after.terminal === 'mate' || (scoreOf(after).mate !== undefined && scoreOf(after).mate <= 0);
   const legal = new Chess(move.before).moves().length;
-  const facts = moveFacts(move, ply);
+  // Le coup précédent sert à reconnaître une reprise ; la réponse compte la prise du coup joué.
+  const prevMove = prev ? prev.move : null;
+  const facts = moveFacts(move, ply, prevMove);
 
-  const best = top && top.pv.length ? analyzeLine(move.before, top.pv) : null;
-  const played = analyzeLine(move.before, [move.lan, ...((after.lines[0] && after.lines[0].pv) || [])]);
-  const reply = after.lines[0] && after.lines[0].pv.length ? analyzeLine(move.after, after.lines[0].pv) : null;
-  const alts = lines.map((l) => ({ score: l.score, line: analyzeLine(move.before, l.pv, { max: 8 }), uci: l.pv[0] }));
+  const best = top && top.pv.length ? analyzeLine(move.before, top.pv, { prev: prevMove }) : null;
+  const played = analyzeLine(move.before, [move.lan, ...((after.lines[0] && after.lines[0].pv) || [])], { prev: prevMove });
+  const reply = after.lines[0] && after.lines[0].pv.length ? analyzeLine(move.after, after.lines[0].pv, { prev: move, seed: true }) : null;
+  const alts = lines.map((l) => ({ score: l.score, line: analyzeLine(move.before, l.pv, { max: 8, prev: prevMove }), uci: l.pv[0] }));
 
   let cls;
   if (legal === 1) cls = 'forced';
@@ -228,26 +253,40 @@ export function makeReport({ move, ply, before, after, prev = null, levelKey = '
     cls = 'miss';
   }
 
-  if ((cls === 'best' || cls === 'excellent') && facts.sacrifice && facts.sacrifice.t !== 'p' && !facts.mate
-    && winAfter >= 45 && (winBefore < 97 || forcedMate)) {
+  // Ce que le coup rapporte par rapport à la meilleure autre option du moteur.
+  const others = lines.filter((l) => l.pv[0] !== move.lan).sort((a, b) => rank(b.score) - rank(a.score));
+  const altBest = others[0] || null;
+  const gap = altBest ? winAfter - winPct(altBest.score) : null;
+
+  // Brillant : un vrai sacrifice (au moins 2 points, hors pion, vérifié en coups légaux), réellement
+  // concédé dans la suite du moteur (ou qui force le mat), et qui donne un avantage décisif
+  // nettement supérieur à toutes les autres options. Pour un sacrifice qui force le mat, la courbe
+  // des chances sature : on exige seulement que la meilleure autre option ne soit pas déjà écrasante.
+  const sac = facts.sacrifice;
+  const given = forcedMate || Math.min(...played.running.slice(1, 6)) <= -2;
+  const decisive = forcedMate ? !altBest || winPct(altBest.score) <= 90 : gap == null || gap >= 15;
+  if (cls === 'best' && sac && sac.t !== 'p' && !facts.mate && given && winAfter >= 80 && decisive) {
     cls = 'brilliant';
-  } else if (cls === 'best' && lines.length >= 2 && !facts.mate) {
-    const second = winPct(lines[1].score);
+  } else if (cls === 'best' && isBest && gap != null && !facts.mate) {
+    // Très bon coup : le seul coup qui tient, à condition qu'il ne soit pas évident
+    // (reprise, gain direct de matériel, simple fuite d'une pièce attaquée).
     const recapture = !!(prev && prev.move.captured && move.to === prev.move.to);
-    if (winBefore - second >= 15 && second <= 85 && !recapture) cls = 'great';
+    const grab = !!(facts.capture && facts.capture.net >= 2);
+    const escape = facts.saved.some((s) => s.moved) && !facts.check && !facts.fork && !facts.threats.length && !facts.mateThreat;
+    if (gap >= 15 && winPct(altBest.score) <= 85 && !recapture && !grab && !escape) cls = 'great';
   }
 
   const diff = missedTactic ? difficulty(best) : null;
   return {
     ply, move, me, them: opp(me),
     san: move.san, sanFr: fr.sanFr(move.san), num: fr.moveNumber(move.before, me),
-    cls, loss, winBefore, winAfter, accuracy: moveAccuracy(winBefore, winAfter),
+    cls, loss, winBefore, winAfter, accuracy: moveAccuracy(before, after),
     isBest, legal, levelKey, elo, thresholds: T,
     before, after, best, played, reply, alts, facts,
     missedTactic, bestMates,
     difficulty: diff,
-    difficultyVerdict: diff ? difficultyVerdict(diff, elo || LEVELS[levelKey].elo) : null,
-    secondGap: lines.length >= 2 ? winBefore - winPct(lines[1].score) : null,
+    difficultyVerdict: diff ? difficultyVerdict(diff, elo || LEVELS[levelKey].elo, `${move.before}|${move.lan}`) : null,
+    altBest, altGap: gap,
   };
 }
 
@@ -369,34 +408,26 @@ export class GameAnalysis {
 
 // ---------- Bilan ----------
 
-function stdev(xs) {
-  const m = xs.reduce((s, x) => s + x, 0) / xs.length;
-  return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / xs.length);
-}
+// Précision de partie : moyenne de puissance ACC_POWER des précisions des coups, (Σ a^p / n)^(1/p).
+// Une grosse faute y pèse plus que dans une moyenne simple, mais bien moins que dans la moyenne
+// harmonique de Lichess. Calée sur 155 parties Chess.com (14 octobre 2026) ; sur 92 parties de
+// validation, 3,2 points d'écart moyen avec Chess.com (voir NOTES-DEV.md, « Précision »).
+const ACC_POWER = 0.4;
 
 function gameAccuracy(an, color) {
-  const wins = an.positions.map(whiteWin);
-  const n = an.reports.length;
-  const size = Math.max(2, Math.min(8, Math.floor(n / 10)));
-  let wSum = 0;
-  let wTot = 0;
-  let hSum = 0;
+  let sum = 0;
   let count = 0;
-  an.reports.forEach((r, i) => {
-    if (r.me !== color) return;
-    const start = i < size - 2 ? 0 : i - (size - 2);
-    const win = wins.slice(start, start + size);
-    const w = Math.max(0.5, Math.min(12, stdev(win)));
-    wSum += r.accuracy * w;
-    wTot += w;
-    hSum += 1 / Math.max(1, r.accuracy);
+  for (const r of an.reports) {
+    if (r.me !== color) continue;
+    sum += Math.max(r.accuracy, 0.01) ** ACC_POWER;
     count++;
-  });
-  if (!count) return null;
-  return (wSum / wTot + count / hSum) / 2;
+  }
+  return count ? (sum / count) ** (1 / ACC_POWER) : null;
 }
 
-const PERF = [[0, 250], [40, 400], [55, 700], [65, 1000], [72, 1250], [78, 1500], [83, 1750], [87, 2000], [90, 2200], [93, 2450], [96, 2700], [98.5, 2900], [100, 3100]];
+// Précision (échelle Chess.com) → Elo. Points d'appui mesurés sur des parties Chess.com : environ 70 %
+// vers 800 Elo, 83 % vers 2200, 85 % vers 2650. Très approximatif sur une seule partie.
+const PERF = [[0, 100], [50, 300], [60, 500], [70, 800], [75, 1200], [80, 1700], [83, 2100], [86, 2450], [90, 2750], [95, 3000], [100, 3200]];
 
 export function perfFromAccuracy(acc) {
   if (acc == null) return null;

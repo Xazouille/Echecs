@@ -9,6 +9,7 @@ import { nameFromEcoUrl } from './openings.js';
 import { Board } from './board.js';
 import { EvalGraph } from './graph.js';
 import { commentaryHtml, summaryHtml, introHtml, pendingHtml, badgeHtml } from './commentary.js';
+import { playSound, soundKind } from './sound.js';
 import * as cc from './chesscom.js';
 import * as fr from './fr.js';
 
@@ -42,8 +43,8 @@ const SAMPLE_PGN = `[Event "Opéra de Paris"]
 14. Rd1 Qe6 15. Bxd7+ Nxd7 16. Qb8+ Nxb8 17. Rd8# 1-0`;
 
 const CLASS_DESC = {
-  brilliant: 'Un sacrifice de pièce qui est aussi le meilleur coup.',
-  great: 'Le seul coup qui garde l’avantage ou sauve la position.',
+  brilliant: 'Un vrai sacrifice (pièce ou qualité) qui est le meilleur coup et donne un avantage décisif, bien supérieur à toute autre option.',
+  great: 'Le seul coup qui garde l’avantage ou sauve la position, quand il n’est pas évident (hors reprises et gains directs).',
   best: 'Le coup choisi par le moteur.',
   excellent: 'Presque aussi bon que le meilleur coup.',
   good: 'Un coup correct qui cède un peu de terrain.',
@@ -60,6 +61,7 @@ const state = {
     depth: store.get('depth', 'standard'),
     level: store.get('level', 'auto'),
     arrows: store.get('arrows', true),
+    sound: store.get('sound', true),
   },
   player: null,
   filter: 'all',
@@ -80,16 +82,18 @@ const state = {
 
 let board;
 let graph;
+let shownFen = null; // position affichée au dernier rendu : un changement déclenche le son du coup
 
 // ---------- Démarrage ----------
 
 function init() {
-  board = new Board($('board'), { onSquare: onSquareClick });
+  board = new Board($('board'), { onSquare: onSquareClick, onDragStart, onDrop });
   graph = new EvalGraph($('graph'), { onPick: (i) => goto(i) });
 
   $('depthSel').value = state.settings.depth;
   $('levelSel').value = state.settings.level;
   $('arrowsChk').checked = state.settings.arrows;
+  $('soundChk').checked = state.settings.sound;
   $('username').value = store.get('username', '');
   $('reviewLevel').innerHTML = $('levelSel').innerHTML.replace('Automatique (Elo de la partie)', 'Auto (Elo)');
 
@@ -119,6 +123,10 @@ function init() {
     state.settings.arrows = e.target.checked;
     store.set('arrows', e.target.checked);
     renderBoard();
+  });
+  $('soundChk').addEventListener('change', (e) => {
+    state.settings.sound = e.target.checked;
+    store.set('sound', e.target.checked);
   });
   $('backBtn').addEventListener('click', () => showHome());
   $('brand').addEventListener('click', (e) => {
@@ -204,7 +212,7 @@ function renderLegend() {
   const items = CLASS_ORDER.map((k) => `<li>${badgeHtml(k)}<div><b>${CLASSES[k].label}</b><span>${CLASS_DESC[k]}</span></div></li>`);
   const rows = Object.entries(LEVELS).map(([key, lv]) => {
     const t = thresholds(key);
-    const p = (v) => `${v.toFixed(1).replace('.0', '').replace('.', ',')} %`;
+    const p = fr.pct;
     return `<tr><th scope="row">${lv.label}</th><td>≤ ${p(t.excellent)}</td><td>≤ ${p(t.good)}</td><td>≤ ${p(t.inaccuracy)}</td><td>≤ ${p(t.mistake)}</td><td>&gt; ${p(t.mistake)}</td></tr>`;
   });
   $('legendGrid').outerHTML = `<ul class="legend-grid" id="legendGrid">${items.join('')}</ul>
@@ -374,6 +382,7 @@ function startReview(game) {
   state.varReports.clear();
   state.pending.clear();
   state.cmtKey = '';
+  shownFen = null;
   state.flipped = game.userColor === 'b';
   state.focus = game.userColor || 'w';
   $('home').hidden = true;
@@ -521,18 +530,52 @@ function currentReport() {
 
 function onSquareClick(sq) {
   if (!state.game) return;
-  const fen = current().fen;
-  const chess = new Chess(fen);
-  if (state.selected) {
-    const mv = chess.moves({ square: state.selected, verbose: true }).find((m) => m.to === sq);
-    if (mv) {
-      playUserMove(fen, { from: state.selected, to: sq, promotion: mv.promotion ? 'q' : undefined });
-      return;
-    }
+  const chess = new Chess(current().fen);
+  if (state.selected && state.selected !== sq && chess.moves({ square: state.selected, verbose: true }).some((m) => m.to === sq)) {
+    tryMove(state.selected, sq);
+    return;
   }
   const p = chess.get(sq);
   state.selected = p && p.color === chess.turn() && state.selected !== sq ? sq : null;
   renderBoard();
+}
+
+// Début d'un glisser-déposer : seules les pièces du camp au trait peuvent bouger.
+function onDragStart(sq) {
+  if (!state.game) return false;
+  const chess = new Chess(current().fen);
+  const p = chess.get(sq);
+  if (!p || p.color !== chess.turn()) return false;
+  state.selected = sq;
+  renderBoard();
+  return true;
+}
+
+function onDrop(from, to) {
+  if (to && to !== from && new Chess(current().fen).moves({ square: from, verbose: true }).some((m) => m.to === to)) {
+    tryMove(from, to);
+    return;
+  }
+  // Lâchée sur sa case : la pièce reste sélectionnée pour un coup au clic ; ailleurs, le coup est annulé.
+  state.selected = to === from ? from : null;
+  renderBoard();
+}
+
+// Joue un coup légal de l'utilisateur, en demandant la pièce de promotion si besoin.
+async function tryMove(from, to) {
+  const fen = current().fen;
+  const mv = new Chess(fen).moves({ square: from, verbose: true }).find((m) => m.to === to);
+  if (!mv) return;
+  let promotion;
+  if (mv.promotion) {
+    promotion = await board.askPromotion(to, mv.color);
+    if (!promotion || !state.game || current().fen !== fen) {
+      state.selected = null;
+      if (state.game) renderBoard();
+      return;
+    }
+  }
+  playUserMove(fen, { from, to, promotion });
 }
 
 function playUserMove(fen, input) {
@@ -575,11 +618,16 @@ async function requestVarReport(m) {
   ]);
   state.pending.delete(key);
   if (!before || !after || state.analysis !== an) return;
+  // Le coup qui mène à cette position (dans la variante, sinon dans la partie) : pour reconnaître une reprise.
+  const v = state.variation;
+  const i = v ? v.moves.indexOf(m) : -1;
+  const prevMove = i > 0 ? v.moves[i - 1] : state.game.moves.find((x) => x.after === m.before) || null;
   state.varReports.set(key, makeReport({
     move: m,
     ply: plyOf(m.before),
     before,
     after,
+    prev: prevMove ? { move: prevMove } : null,
     levelKey: an.levelFor(m.color),
     elo: an.eloFor(m.color),
   }));
@@ -637,6 +685,11 @@ function renderBoard() {
   let targets = [];
   if (state.selected) {
     targets = new Chess(cur.fen).moves({ square: state.selected, verbose: true }).map((m) => m.to);
+  }
+  if (cur.fen !== shownFen) {
+    board.closePromotion(null);
+    if (shownFen && cur.move && state.settings.sound) playSound(soundKind(cur.move));
+    shownFen = cur.fen;
   }
   board.render({
     fen: cur.fen,
@@ -756,7 +809,7 @@ function renderCommentary() {
   if (key !== state.cmtKey) {
     let html;
     if (free && !fm) {
-      html = pendingHtml('Clique sur une pièce puis sur une case pour tester un coup.');
+      html = pendingHtml('Fais glisser une pièce, ou clique sur la pièce puis sur une case, pour tester un coup.');
     } else if (free && freeRep) {
       state.lines = new Map();
       html = `<p class="var-note">Coup testé hors partie : il est analysé et expliqué comme ceux de la partie.</p>${commentaryHtml(freeRep, state.lines, { game: state.game, glossary: isLowLevel(fm.color) })}`;

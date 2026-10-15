@@ -87,25 +87,92 @@ export function findKing(pos, color) {
   return pos.sq.findIndex((p) => p && p.t === 'k' && p.c === color);
 }
 
-function leastValuable(pos, target, color) {
+function leastValuable(pos, target, color, allowed) {
   let best = -1;
   let bestVal = Infinity;
   for (const i of attackersOf(pos, target, color)) {
+    if (!allowed(i)) continue;
     const v = SEE_VALUE[pos.sq[i].t];
     if (v < bestVal) { bestVal = v; best = i; }
   }
   return best;
 }
 
+// Pièces de `color` clouées sur leur Roi (Set des cases).
+export function absolutePins(pos, color) {
+  const pins = new Set();
+  const k = findKing(pos, color);
+  if (k < 0) return pins;
+  for (const [df, dr] of [...DIAG, ...ORTH]) {
+    const slider = df !== 0 && dr !== 0 ? 'b' : 'r';
+    let f = (k & 7) + df;
+    let r = (k >> 3) + dr;
+    let first = -1;
+    while (f >= 0 && f < 8 && r >= 0 && r < 8) {
+      const q = pos.sq[r * 8 + f];
+      if (q) {
+        if (first < 0) {
+          if (q.c !== color) break;
+          first = r * 8 + f;
+        } else {
+          if (q.c !== color && (q.t === 'q' || q.t === slider)) pins.add(first);
+          break;
+        }
+      }
+      f += df;
+      r += dr;
+    }
+  }
+  return pins;
+}
+
+// c est-elle sur la droite qui passe par a et b ?
+export const aligned = (a, b, c) => ((b & 7) - (a & 7)) * ((c >> 3) - (a >> 3)) === ((b >> 3) - (a >> 3)) * ((c & 7) - (a & 7));
+
+// c est-elle strictement entre a et b, sur la ligne qui les joint ?
+export const between = (a, b, c) => c !== a && c !== b && aligned(a, b, c)
+  && Math.min(a & 7, b & 7) <= (c & 7) && (c & 7) <= Math.max(a & 7, b & 7)
+  && Math.min(a >> 3, b >> 3) <= (c >> 3) && (c >> 3) <= Math.max(a >> 3, b >> 3);
+
+// Pièces qui donnent échec à chaque Roi, calculées une fois et gardées sur l'objet position.
+function checkersOf(pos) {
+  if (!pos.checkers) {
+    const kw = findKing(pos, 'w');
+    const kb = findKing(pos, 'b');
+    pos.checkers = { w: kw >= 0 ? attackersOf(pos, kw, 'b') : [], b: kb >= 0 ? attackersOf(pos, kb, 'w') : [] };
+  }
+  return pos.checkers;
+}
+
 // Échange statique (SEE) : gain matériel, en pions, pour `by` s'il commence
 // à capturer sur `target` et que chaque camp choisit au mieux de continuer.
-// Positif = la capture rapporte du matériel.
-export function see(pos, target, by) {
+// Positif = la capture rapporte du matériel. Une pièce clouée sur son Roi ne prend que sur
+// la ligne du clouage (clouages recalculés après chaque prise : une prise peut libérer une pièce
+// clouée) ; un camp en échec ne peut d'abord prendre que la pièce qui donne échec, ou prendre avec
+// son Roi. Un Roi qui vient de prendre peut être « repris » même par une pièce clouée : c'est la
+// façon de dire qu'il n'avait pas le droit de prendre une pièce défendue.
+// L'échange est déroulé jusqu'au bout, sans élagage : l'élagage habituel faussait le montant
+// (Cxb5 cxb5 Fxb5+ comptait 2 pions perdus au lieu de 1).
+// `ignoreCheck` : on fait comme si `by` n'était pas en échec. Un échec ne protège rien : il retarde
+// seulement la prise, qui redevient possible une fois l'échec paré.
+export function see(pos, target, by, ignoreCheck = false) {
+  const checkers = ignoreCheck ? [] : checkersOf(pos)[by];
   const sq = pos.sq.slice();
   const board = { sq };
   const victim = sq[target];
   if (!victim || victim.c === by) return 0;
-  let from = leastValuable(board, target, by);
+  const attacker = (side, first) => {
+    const pins = absolutePins(board, side);
+    const king = findKing(board, side);
+    const kingOnTarget = sq[target].t === 'k';
+    return leastValuable(board, target, side, (i) => {
+      const p = sq[i];
+      if (!kingOnTarget && p.t !== 'k' && pins.has(i) && !aligned(king, i, target)) return false;
+      if (first && checkers.length && p.t !== 'k') return checkers.length === 1 && checkers[0] === target;
+      return true;
+    });
+  };
+  let from = attacker(by, true);
   if (from < 0) return 0;
   const gain = [SEE_VALUE[victim.t]];
   let d = 0;
@@ -114,11 +181,10 @@ export function see(pos, target, by) {
   for (;;) {
     d++;
     gain[d] = SEE_VALUE[piece.t] - gain[d - 1];
-    if (Math.max(-gain[d - 1], gain[d]) < 0) break;
     sq[target] = piece;
     sq[from] = null;
     side = opp(side);
-    from = leastValuable(board, target, side);
+    from = attacker(side, false);
     if (from < 0) break;
     piece = sq[from];
   }
@@ -162,7 +228,8 @@ export function linesBy(pos, color) {
                 res.push({ kind: 'pin', absolute: true, by: i, pinned: first, behind: j });
               } else if ((a.t === 'k' || VALUE[a.t] > VALUE[q.t]) && q.t !== 'p' && (a.t === 'k' || a.t === 'q' || a.t === 'r')) {
                 res.push({ kind: 'skewer', by: i, front: first, behind: j });
-              } else if (a.t !== 'p' && VALUE[q.t] > VALUE[a.t]) {
+              } else if (a.t !== 'p' && a.t !== 'k' && VALUE[q.t] > VALUE[a.t]) {
+                // Le Roi n'est jamais « cloué » : une pièce derrière lui relève de l'enfilade.
                 res.push({ kind: 'pin', absolute: false, by: i, pinned: first, behind: j });
               }
             }

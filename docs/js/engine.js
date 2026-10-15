@@ -1,4 +1,4 @@
-// Pilote UCI pour Stockfish 17.1 (NNUE « lite », WebAssembly) lancé dans un Web Worker.
+// Pilote UCI pour Stockfish 19 (WebAssembly) lancé dans un Web Worker.
 // Les analyses passent par une file d'attente ; une analyse prioritaire passe devant.
 
 function parseInfo(line) {
@@ -36,21 +36,21 @@ export class Engine {
     this.ready = null;
     this.threads = 1;
     this.multiPv = 0;
-    this.label = 'Stockfish 17.1';
+    this.label = 'Stockfish 19';
   }
 
-  // Essaie la version multi-thread (plus rapide) puis, si le navigateur la refuse,
-  // la version mono-thread.
+  // Version complète (réseau NNUE complet, 99 Mo), mono-thread : aux profondeurs du site (10 à 16),
+  // les threads supplémentaires ralentissent Stockfish 19 au lieu de l'accélérer (22 positions à
+  // profondeur 12 : 7,6 s avec 1 thread, 19,9 s avec 4, 27,9 s avec 8), et la précision a été calée
+  // en mono-thread. Si elle ne se charge pas, repli sur la version « lite », moins précise.
   init() {
     if (this.ready) return this.ready;
-    const multi = self.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
-    const cores = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 1));
-    const single = () => this.start('vendor/stockfish/sf-lite-single.js', 1);
-    this.ready = multi && cores > 1 ? this.start('vendor/stockfish/sf-lite.js', cores).catch(single) : single();
+    const lite = () => this.start('vendor/stockfish/stockfish-19-lite-single.js', 1, 'Stockfish 19 lite (mode de secours)');
+    this.ready = this.start('vendor/stockfish/stockfish-19-single.js', 1).catch(lite);
     return this.ready;
   }
 
-  start(file, threads) {
+  start(file, threads, name = 'Stockfish 19') {
     return new Promise((resolve, reject) => {
       let settled = false;
       const fail = (msg) => {
@@ -62,7 +62,8 @@ export class Engine {
         this.waiters = [];
         reject(new Error(msg));
       };
-      const timer = setTimeout(() => fail('Le moteur ne répond pas.'), 15000);
+      // Le réseau complet (99 Mo) peut mettre plusieurs secondes à se charger.
+      const timer = setTimeout(() => fail('Le moteur ne répond pas.'), 60000);
       try {
         this.worker = new Worker(file);
       } catch (err) {
@@ -83,7 +84,7 @@ export class Engine {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          this.label = `Stockfish 17.1 · ${threads} thread${threads > 1 ? 's' : ''}`;
+          this.label = `${name} · ${threads} thread${threads > 1 ? 's' : ''}`;
           this.next();
           resolve(this);
         });

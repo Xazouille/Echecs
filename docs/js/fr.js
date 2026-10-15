@@ -24,7 +24,25 @@ export const sq = sqTag;
 
 export const side = (c) => (c === 'w' ? 'les Blancs' : 'les Noirs');
 export const Side = (c) => (c === 'w' ? 'Les Blancs' : 'Les Noirs');
+export const auxSide = (c) => (c === 'w' ? 'aux Blancs' : 'aux Noirs');
 export const color = (c) => (c === 'w' ? 'Blancs' : 'Noirs');
+
+// Choix d'une tournure parmi plusieurs. Le choix dépend seulement de la clé (le coup et le type de
+// phrase) : un même coup garde toujours la même formulation, et deux coups voisins en changent.
+export function pick(key, variants) {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 15;
+  h = Math.imul(h, 2246822507);
+  h ^= h >>> 13;
+  return variants[(h >>> 0) % variants.length];
+}
+
+// « 2 coups », « 1 coup »
+export const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
 const LETTERS = { K: 'R', Q: 'D', R: 'T', B: 'F', N: 'C' };
 export const sanFr = (san) => san.replace(/[KQRBN]/g, (c) => LETTERS[c]);
@@ -47,6 +65,9 @@ export function pawns(v) {
   const txt = String(n).replace('.', ',');
   return Math.abs(n) <= 1 ? `${txt} pion` : `${txt} pions`;
 }
+
+// « 3,2 % », « 4 % »
+export const pct = (v) => `${v.toFixed(1).replace(/\.0$/, '').replace('.', ',')} %`;
 
 const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const ORDER = ['q', 'r', 'b', 'n', 'p'];
@@ -73,14 +94,16 @@ export function trade(gained, lost) {
   const sum = (a) => a.reduce((s, t) => s + VALUE[t], 0);
   const net = sum(g) - sum(l);
   let text = '';
+  let short = '';
   if (g.length === 1 && g[0] === 'r' && l.length === 1 && (l[0] === 'n' || l[0] === 'b')) {
     text = 'la qualité (une Tour contre une pièce mineure)';
+    short = 'la qualité';
   } else if (g.length && !l.length) {
     text = group(g);
   } else if (g.length && l.length) {
     text = `${group(g)} contre ${group(l)}`;
   }
-  return { net, text, gained: g, lost: l, lostText: l.length ? group(l) : '', gainedText: g.length ? group(g) : '' };
+  return { net, text, short: short || text, gained: g, lost: l, lostText: l.length ? group(l) : '', gainedText: g.length ? group(g) : '' };
 }
 
 export function evalText(score) {
