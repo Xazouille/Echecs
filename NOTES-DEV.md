@@ -237,6 +237,33 @@ Plus de réglages ne captent pas d'information nouvelle : ils collent au bruit d
   - `ACC_K` : aucun gain.
 - **À savoir** : une seule formule sert aux trois niveaux. Elle est calée sur Standard (18). Entre les profondeurs 12 et 18, la précision est montée d'environ 0,7 point. Rapide (16) devrait donc être très légèrement plus sévère que Standard, et Approfondie (20) très légèrement plus clément ; non mesuré.
 
+**Coups particuliers, testés sans gain (16 octobre 2026).** Question : Chess.com traite-t-il à part certains coups (théoriques, forcés, positions jouées, mats) ? Chaque règle a été testée avec `ACC_B` réajusté en validation croisée, sur 154 des 155 parties en profondeur 12 (une partie n'a pas pu être récupérée) et sur les 24 en profondeur 18.
+
+| Règle | Profondeur 12 (154 parties) | Profondeur 18 (24 parties) |
+|---|---|---|
+| **Actuelle** (tous les coups comptent normalement) | **2,866** | **2,20** |
+| Coups théoriques notés 100 | 2,884 | 2,209 |
+| Coups forcés ignorés | 2,859 | 2,536 |
+| Positions jouées (±10) ignorées | 3,19 | 2,99 |
+| Coups dans une suite de mat ignorés | 3,12 | 2,67 |
+| Deux premiers coups notés 100 | 2,869 | 2,158 |
+
+- Aucune règle ne gagne sur les deux jeux de données. Les petits gains (forcés en profondeur 12, deux premiers coups en profondeur 18) sont du bruit et s'inversent sur l'autre jeu.
+- Ignorer les positions jouées ou les mats dégrade nettement : Chess.com compte ces coups.
+- **Conclusion** : Chess.com semble compter tous les coups de la même façon. Rien n'est changé.
+
+**Performance estimée (16 octobre 2026).**
+- **Problème** : l'ancienne table (`PERF`) lisait directement un Elo dans la précision. Or la précision d'une seule partie varie énormément pour un même niveau. Une bonne partie de débutant (82,8 % à 809 Elo) recevait ainsi environ 2 100 de performance.
+- **Données** : 308 joueurs des parties de calage (154 parties), dont l'Elo et la précision Chess.com sont connus.
+  - Précision moyenne ≈ `PERF_A + PERF_S × Elo`, soit 62,1 % + 8,86 points par 1 000 Elo.
+  - Corrélation 0,48 seulement ; écart type autour de la droite : 11,6 points.
+  - Inverser directement la droite serait encore pire : 82,8 % donnerait environ 2 350.
+- **Méthode retenue** (« réaliste », choisie par l'utilisateur) : partir de l'Elo du joueur, puis s'en écarter de `PERF_K = 10,5` Elo par point de précision au-dessus ou au-dessous de la précision habituelle à cet Elo.
+  - `perf = Elo + 10,5 × (précision − (62,1 + 0,00886 × Elo))`, arrondi à 50, borné entre 100 et 3 200.
+  - C'est l'estimation bayésienne (rétrécissement vers l'Elo) si la performance d'une partie varie d'environ ±400 Elo autour du classement.
+  - Elo inconnu (PGN collé sans classement) : on inverse la droite, faute de mieux.
+- **Exemples** : 82,8 % à 809 Elo → 950 ; 80 % à 1 500 → 1 550 ; 85 % à 2 200 → 2 250 ; 60 % à 400 → 350 ; 68,5 % à 769 → 750.
+
 **Évolution de la formule de partie (14 octobre 2026).**
 - **Avant** : 0,25 de moyenne pondérée par la volatilité et 0,75 de moyenne simple, avec `ACC_K = 0,0015`, `ACC_B = 0,25`, `ACC_TOL = 0,5`.
 - **Idées testées** sur les deux analyses Stockfish 19 des mêmes parties : validation croisée 5 × 20 par partie, qui garde les deux analyses d'une même partie dans le même groupe.
@@ -268,7 +295,7 @@ Le groupe 1000-1800 recule, mais il ne compte que 5 parties.
 - **Différence avec l'ancienne : −1,15 point**, intervalle à 95 % (bootstrap par partie) : [−1,73 ; −0,57]. Le gain est réel.
 - **Le recul des 1000-1800 vu au calage ne se confirme pas** sur 20 parties nouvelles.
 - **L'écart réel sur des parties nouvelles est d'environ 3,7 points**, un peu plus que les 2,9 estimés par validation croisée.
-- **Performance estimée** (`PERF`) : table précision → Elo, recalée sur les points d'appui mesurés. Chess.com donne en moyenne environ 70 % vers 800 Elo, 81-83 % vers 2200 et 85 % vers 2650. L'estimation reste très approximative sur une seule partie.
+- **Performance estimée** : voir « Performance estimée (16 octobre 2026) » ci-dessus.
 
 **Comment le calage a été fait** :
 - **Données** : 62 parties Chess.com qui ont une précision officielle, soit 124 précisions.

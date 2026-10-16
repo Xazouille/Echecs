@@ -560,18 +560,25 @@ function gameAccuracy(an, color) {
   return count ? (sum / count) ** (1 / ACC_POWER) : null;
 }
 
-// Précision (échelle Chess.com) → Elo. Points d'appui mesurés sur des parties Chess.com : environ 70 %
-// vers 800 Elo, 83 % vers 2200, 85 % vers 2650. Très approximatif sur une seule partie.
-const PERF = [[0, 100], [50, 300], [60, 500], [70, 800], [75, 1200], [80, 1700], [83, 2100], [86, 2450], [90, 2750], [95, 3000], [100, 3200]];
+// Performance estimée (16 octobre 2026). Sur 308 joueurs de parties Chess.com (Elo et précision
+// Chess.com connus), la précision moyenne vaut environ PERF_A + PERF_S × Elo (62,1 % + 8,86 points
+// par 1 000 Elo), mais varie de ±11,6 points d'une partie à l'autre pour un même Elo (corrélation
+// 0,48) : la précision d'une seule partie dit peu du niveau. La performance part donc de l'Elo du
+// joueur et s'en écarte de PERF_K Elo par point de précision au-dessus ou au-dessous de la précision
+// habituelle à cet Elo. C'est la meilleure estimation si la performance d'une partie varie d'environ
+// ±400 Elo autour du classement. L'ancienne table (lecture directe précision → Elo) donnait par
+// exemple 2 100 pour 82,8 % à un joueur de 800 Elo ; ici, environ 950.
+const PERF_A = 62.1;
+const PERF_S = 0.00886;
+const PERF_K = 10.5;
 
-export function perfFromAccuracy(acc) {
+export function perfEstimate(acc, elo) {
   if (acc == null) return null;
-  for (let i = 1; i < PERF.length; i++) {
-    const [a1, e1] = PERF[i - 1];
-    const [a2, e2] = PERF[i];
-    if (acc <= a2) return Math.round((e1 + ((acc - a1) / (a2 - a1)) * (e2 - e1)) / 50) * 50;
-  }
-  return 3100;
+  const round = (e) => Math.round(Math.max(100, Math.min(3200, e)) / 50) * 50;
+  // Elo inconnu (PGN collé sans classement) : l'Elo pour lequel cette précision est habituelle.
+  if (!elo) return round((acc - PERF_A) / PERF_S);
+  const e = Math.max(100, Math.min(3000, elo));
+  return round(e + PERF_K * (acc - (PERF_A + PERF_S * e)));
 }
 
 function phaseOf(fen, ply, bookDepth) {
@@ -617,7 +624,7 @@ export function buildSummary(an) {
     players[c] = {
       counts,
       accuracy,
-      perf: perfFromAccuracy(accuracy),
+      perf: perfEstimate(accuracy, (c === 'w' ? game.white : game.black).elo),
       phases: { opening: avg(phases.opening), middlegame: avg(phases.middlegame), endgame: avg(phases.endgame) },
       missed,
       themes,
